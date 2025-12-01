@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 
 class AdminManagementTab extends StatefulWidget {
@@ -34,6 +36,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
   // Staff management state variables
   List<Map<String, dynamic>> _staffAccounts = [];
   bool _isLoadingStaffAccounts = false;
+  String? _staffAccountsError; // Track error state for staff accounts
   Map<String, dynamic>? _editingStaff;
   final TextEditingController _editStaffNameController =
       TextEditingController();
@@ -546,9 +549,9 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
             'Error creating staff account: $e\n\nThe account may already exist in the database.',
           );
         }
-      } else {
-        _showErrorDialog('Error creating staff account: ${e.toString()}');
-      }
+        } else {
+          _showErrorDialog('Error creating staff account: ${_getUserFriendlyError(e)}');
+        }
     } finally {
       setState(() {
         _isCreatingStaffAccount = false;
@@ -1280,7 +1283,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
       }
     } catch (e) {
       print('Error loading admin scanner data: $e');
-      _showErrorDialog('Error loading data: $e');
+      _showErrorDialog('Error loading data: ${_getUserFriendlyError(e)}');
       // Set empty lists to prevent infinite loading
       setState(() {
         _adminAccounts = [];
@@ -1470,7 +1473,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
         await _assignScannerFallback();
       }
     } catch (e) {
-      _showErrorDialog('Error assigning scanner: $e');
+      _showErrorDialog('Error assigning scanner: ${_getUserFriendlyError(e)}');
     }
   }
 
@@ -1493,7 +1496,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
         _selectedAdminScannerId = null;
       });
     } catch (e) {
-      _showErrorDialog('Error assigning scanner: $e');
+      _showErrorDialog('Error assigning scanner: ${_getUserFriendlyError(e)}');
     }
   }
 
@@ -1519,7 +1522,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
         await _unassignScannerFallback(adminId);
       }
     } catch (e) {
-      _showErrorDialog('Error unassigning scanner: $e');
+      _showErrorDialog('Error unassigning scanner: ${_getUserFriendlyError(e)}');
     }
   }
 
@@ -1538,7 +1541,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
       _showSuccessDialog('Scanner unassigned from admin successfully');
       await _loadAdminScannerData();
     } catch (e) {
-      _showErrorDialog('Error unassigning scanner: $e');
+      _showErrorDialog('Error unassigning scanner: ${_getUserFriendlyError(e)}');
     }
   }
 
@@ -1655,8 +1658,8 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
 
-    // Load staff accounts when this function is first accessed
-    if (_staffAccounts.isEmpty && !_isLoadingStaffAccounts) {
+    // Load staff accounts when this function is first accessed (only if no error)
+    if (_staffAccounts.isEmpty && !_isLoadingStaffAccounts && _staffAccountsError == null) {
       _loadStaffAccounts();
     }
 
@@ -1714,6 +1717,58 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
                   ),
                 ),
               )
+            // Error state
+            else if (_staffAccountsError != null)
+              Center(
+                child: Container(
+                  padding: EdgeInsets.all(isMobile ? 20 : 30),
+                  margin: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: Colors.red.shade600,
+                        size: 48,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Failed to Load Staff Accounts',
+                        style: TextStyle(
+                          fontSize: isMobile ? 18 : 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red.shade700,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _staffAccountsError!,
+                        style: TextStyle(
+                          fontSize: isMobile ? 14 : 16,
+                          color: Colors.red.shade600,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton.icon(
+                        onPressed: _loadStaffAccounts,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: evsuRed,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            // Empty state (no error, just no data)
             else if (_staffAccounts.isEmpty)
               Center(
                 child: Container(
@@ -2248,6 +2303,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
   Future<void> _loadStaffAccounts() async {
     setState(() {
       _isLoadingStaffAccounts = true;
+      _staffAccountsError = null; // Clear previous error
     });
 
     try {
@@ -2262,11 +2318,13 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
 
       setState(() {
         _staffAccounts = List<Map<String, dynamic>>.from(response);
+        _staffAccountsError = null; // Clear error on success
       });
     } catch (e) {
       print('Error loading staff accounts: $e');
-      _showErrorDialog('Error loading staff accounts: ${e.toString()}');
+      final userFriendlyError = _getUserFriendlyError(e);
       setState(() {
+        _staffAccountsError = userFriendlyError;
         _staffAccounts = [];
       });
     } finally {
@@ -2303,7 +2361,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
         _showErrorDialog(errorMessage);
       }
     } catch (e) {
-      _showErrorDialog('Error updating staff status: ${e.toString()}');
+      _showErrorDialog('Error updating staff status: ${_getUserFriendlyError(e)}');
     }
   }
 
@@ -2646,10 +2704,10 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
             'Username already exists: ${_editStaffUsernameController.text.trim()}\n\nThis username is already taken. Please choose a different username.',
           );
         } else {
-          _showErrorDialog('Error updating staff account: $e');
+          _showErrorDialog('Error updating staff account: ${_getUserFriendlyError(e)}');
         }
       } else {
-        _showErrorDialog('Error updating staff account: ${e.toString()}');
+        _showErrorDialog('Error updating staff account: ${_getUserFriendlyError(e)}');
       }
     } finally {
       setState(() {
@@ -3097,7 +3155,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
         _showErrorDialog(errorMessage);
       }
     } catch (e) {
-      _showErrorDialog('Error updating permissions: ${e.toString()}');
+      _showErrorDialog('Error updating permissions: ${_getUserFriendlyError(e)}');
     } finally {
       setState(() {
         _isUpdatingPermissions = false;
@@ -3324,7 +3382,7 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
           'Cannot delete staff account: This account is referenced by other records in the database.\n\nPlease remove all associated data first.',
         );
       } else {
-        _showErrorDialog('Error deleting staff account: ${e.toString()}');
+        _showErrorDialog('Error deleting staff account: ${_getUserFriendlyError(e)}');
       }
     } finally {
       setState(() {
@@ -3351,5 +3409,55 @@ class _AdminManagementTabState extends State<AdminManagementTab> {
     } catch (e) {
       throw Exception('Fallback deletion failed: $e');
     }
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Failed to load data. Please try again later.';
+    }
+
+    // Check for other connection-related errors (including string messages)
+    final errorString = error.toString().toLowerCase();
+    
+    // Check for network-related error messages (including common variations)
+    if (errorString.contains('socket') ||
+        errorString.contains('socketexception') ||
+        errorString.contains('socket exception') ||
+        errorString.contains('client exception') ||
+        errorString.contains('clientexception') ||
+        errorString.contains('client_exception') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('no address associated') ||
+        errorString.contains('connection refused')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Failed to load data. Please try again later.';
   }
 }

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 
 class FeedbackTab extends StatefulWidget {
@@ -41,17 +43,106 @@ class _FeedbackTabState extends State<FeedbackTab> {
           _isLoading = false;
         });
       } else {
+        // Use helper method to get user-friendly error message from result
+        final errorMsg = _getUserFriendlyMessageFromResponse(result) ??
+            'Failed to load feedback. Please try again.';
         setState(() {
-          _errorMessage = result['message'] ?? 'Failed to load feedback';
+          _errorMessage = errorMsg;
           _isLoading = false;
         });
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'Error loading feedback: ${e.toString()}';
+        _errorMessage = _getUserFriendlyError(e);
         _isLoading = false;
       });
     }
+  }
+
+  /// Get user-friendly message from service response
+  /// Handles both error objects and service response maps
+  String? _getUserFriendlyMessageFromResponse(Map<String, dynamic>? response) {
+    if (response == null) return null;
+    
+    // If there's an error field, use it
+    if (response['error'] != null) {
+      return _getUserFriendlyError(response['error']);
+    }
+    
+    // If there's a message field, check if it contains technical details
+    if (response['message'] != null) {
+      final message = response['message'].toString();
+      // Check if message contains technical error details
+      final messageLower = message.toLowerCase();
+      if (messageLower.contains('client exception') ||
+          messageLower.contains('socket exception') ||
+          messageLower.contains('socketexception') ||
+          messageLower.contains('clientexception') ||
+          messageLower.contains('failed host lookup') ||
+          messageLower.contains('connection') ||
+          messageLower.contains('network') ||
+          messageLower.contains('timeout') ||
+          messageLower.contains('socket') ||
+          messageLower.contains('supabase') ||
+          messageLower.contains('http://') ||
+          messageLower.contains('https://')) {
+        // It's a technical error, convert it to user-friendly
+        return _getUserFriendlyError(message);
+      }
+      // It's already a user-friendly message, return as is
+      return message;
+    }
+    
+    return null;
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Failed to load feedback data. Please try again later.';
+    }
+
+    // Check for other connection-related errors (including string messages)
+    final errorString = error.toString().toLowerCase();
+    
+    // Check for network-related error messages (including common variations)
+    if (errorString.contains('socket') ||
+        errorString.contains('socketexception') ||
+        errorString.contains('socket exception') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('no address associated') ||
+        errorString.contains('client exception') ||
+        errorString.contains('clientexception') ||
+        errorString.contains('client_exception')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Failed to load feedback data. Please try again later.';
   }
 
   String _formatDateTime(String dateTimeStr) {

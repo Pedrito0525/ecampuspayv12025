@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 import 'admin_dashboard.dart';
 
@@ -91,11 +93,149 @@ class _DashboardTabState extends State<DashboardTab> {
       // Load chart data
       await _loadChartData();
     } catch (e) {
+      final userFriendlyError = _getUserFriendlyError(e);
       setState(() {
-        _errorMessage = 'Error loading dashboard data: ${e.toString()}';
+        _errorMessage = userFriendlyError;
         _isLoading = false;
       });
+      // Show error modal
+      if (mounted) {
+        _showErrorModal(userFriendlyError);
+      }
     }
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Unable to load data. Please try again later.';
+    }
+
+    // Check for other connection-related errors
+    final errorString = error.toString().toLowerCase();
+    
+    // Remove URLs and technical details
+    if (errorString.contains('socket') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('no address associated')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Unable to load dashboard data. Please try again later.';
+  }
+
+  /// Show error modal dialog
+  void _showErrorModal(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: evsuRed, size: 28),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Connection Error',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Please check your internet connection and try again.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blue,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              // Retry loading data
+              _loadDashboardData();
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: evsuRed,
+            ),
+            child: const Text(
+              'Retry',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: evsuRed,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<double> _getTodayTransactions() async {
@@ -106,6 +246,8 @@ class _DashboardTabState extends State<DashboardTab> {
       );
       return (response['total'] as num?)?.toDouble() ?? 0.0;
     } catch (e) {
+      // Silently handle errors - return 0
+      print('Error loading today transactions: ${_getUserFriendlyError(e)}');
       return 0.0;
     }
   }
@@ -118,6 +260,8 @@ class _DashboardTabState extends State<DashboardTab> {
       );
       return (response['count'] as num?)?.toInt() ?? 0;
     } catch (e) {
+      // Silently handle errors - return 0
+      print('Error loading active users: ${_getUserFriendlyError(e)}');
       return 0;
     }
   }
@@ -207,7 +351,8 @@ class _DashboardTabState extends State<DashboardTab> {
         _transactionSpots.add(FlSpot((6 - i).toDouble(), dailyTotal));
       }
     } catch (e) {
-      print('Error loading transaction chart data: $e');
+      // Silently handle chart errors - use fallback data
+      print('Error loading transaction chart data: ${_getUserFriendlyError(e)}');
       // Fallback to sample data
       _generateTransactionChartData();
     }

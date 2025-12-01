@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/session_service.dart';
 import '../services/supabase_service.dart';
 import '../services/esp32_bluetooth_service_account.dart';
@@ -2125,59 +2127,219 @@ class _CashierTabState extends State<CashierTab> {
     );
   }
 
-  Future<void> _loadItems() async {
-    final serviceIdStr =
-        SessionService.currentUserData?['service_id']?.toString() ?? '0';
-    final operationalType =
-        SessionService.currentUserData?['operational_type']?.toString() ??
-        'Main';
-    final mainServiceIdStr =
-        SessionService.currentUserData?['main_service_id']?.toString();
+  /// Get user-friendly message from service response
+  /// Handles both error objects and service response maps
+  String? _getUserFriendlyMessageFromResponse(Map<String, dynamic>? response) {
+    if (response == null) return null;
 
-    final serviceId = int.tryParse(serviceIdStr) ?? 0;
-    final mainServiceId = int.tryParse(mainServiceIdStr ?? '');
+    // If there's an error field, use it
+    if (response['error'] != null) {
+      return _getUserFriendlyError(response['error']);
+    }
 
-    final resp = await SupabaseService.getEffectivePaymentItems(
-      serviceAccountId: serviceId,
-      operationalType: operationalType,
-      mainServiceId: mainServiceId,
-    );
-
-    if (resp['success'] == true) {
-      final List data = resp['data'] as List;
-      print('DEBUG: Loading ${data.length} items from database');
-      products.clear();
-      _productById.clear();
-      for (final raw in data) {
-        final hasSizes = raw['has_sizes'] == true;
-        final Map<String, dynamic> product = {
-          'id': raw['id'].toString(),
-          'name': raw['name'],
-          'price': (raw['base_price'] as num).toDouble(),
-          'hasSizes': hasSizes,
-          'category': raw['category'],
-        };
-        if (hasSizes && raw['size_options'] != null) {
-          final sizes = <Map<String, dynamic>>[];
-          (raw['size_options'] as Map).forEach((k, v) {
-            final price = (v as num).toDouble();
-            sizes.add({'name': k.toString(), 'price': price});
-          });
-          product['sizes'] = sizes;
-        }
-        products.add(product);
-        _productById[product['id']] = product;
+    // If there's a message field, check if it contains technical details
+    if (response['message'] != null) {
+      final message = response['message'].toString();
+      // Check if message contains technical error details
+      final messageLower = message.toLowerCase();
+      if (messageLower.contains('client exception') ||
+          messageLower.contains('socket exception') ||
+          messageLower.contains('socketexception') ||
+          messageLower.contains('clientexception') ||
+          messageLower.contains('failed host lookup') ||
+          messageLower.contains('connection') ||
+          messageLower.contains('network') ||
+          messageLower.contains('timeout') ||
+          messageLower.contains('socket') ||
+          messageLower.contains('supabase') ||
+          messageLower.contains('http://') ||
+          messageLower.contains('https://')) {
+        // It's a technical error, convert it to user-friendly
+        return _getUserFriendlyError(message);
       }
-      print('DEBUG: Successfully loaded ${products.length} products');
-      setState(() {}); // Trigger UI rebuild to display loaded items
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load items: ${resp['message'] ?? ''}'),
-            backgroundColor: const Color(0xFFDC3545),
+      // It's already a user-friendly message, return as is
+      return message;
+    }
+
+    return null;
+  }
+
+  /// Show error dialog with user-friendly message
+  void _showErrorDialog(String title, String message) {
+    if (!mounted) return;
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  color: Color(0xFFDC3545),
+                  size: 24,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: isMobile ? 18 : 20,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFFDC3545),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              message,
+              style: TextStyle(
+                fontSize: isMobile ? 14 : 16,
+                color: Colors.black87,
+              ),
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFDC3545),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'OK',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
           ),
-        );
+    );
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Failed to load items. Please try again later.';
+    }
+
+    // Check for other connection-related errors (including string messages)
+    final errorString = error.toString().toLowerCase();
+
+    // Check for network-related error messages (including common variations)
+    if (errorString.contains('socket') ||
+        errorString.contains('socketexception') ||
+        errorString.contains('socket exception') ||
+        errorString.contains('client exception') ||
+        errorString.contains('clientexception') ||
+        errorString.contains('client_exception') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('no address associated') ||
+        errorString.contains('connection refused') ||
+        errorString.contains('connection reset')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Failed to load items. Please try again later.';
+  }
+
+  Future<void> _loadItems() async {
+    try {
+      final serviceIdStr =
+          SessionService.currentUserData?['service_id']?.toString() ?? '0';
+      final operationalType =
+          SessionService.currentUserData?['operational_type']?.toString() ??
+          'Main';
+      final mainServiceIdStr =
+          SessionService.currentUserData?['main_service_id']?.toString();
+
+      final serviceId = int.tryParse(serviceIdStr) ?? 0;
+      final mainServiceId = int.tryParse(mainServiceIdStr ?? '');
+
+      final resp = await SupabaseService.getEffectivePaymentItems(
+        serviceAccountId: serviceId,
+        operationalType: operationalType,
+        mainServiceId: mainServiceId,
+      );
+
+      if (resp['success'] == true) {
+        final List data = resp['data'] as List;
+        print('DEBUG: Loading ${data.length} items from database');
+        products.clear();
+        _productById.clear();
+        for (final raw in data) {
+          final hasSizes = raw['has_sizes'] == true;
+          final Map<String, dynamic> product = {
+            'id': raw['id'].toString(),
+            'name': raw['name'],
+            'price': (raw['base_price'] as num).toDouble(),
+            'hasSizes': hasSizes,
+            'category': raw['category'],
+          };
+          if (hasSizes && raw['size_options'] != null) {
+            final sizes = <Map<String, dynamic>>[];
+            (raw['size_options'] as Map).forEach((k, v) {
+              final price = (v as num).toDouble();
+              sizes.add({'name': k.toString(), 'price': price});
+            });
+            product['sizes'] = sizes;
+          }
+          products.add(product);
+          _productById[product['id']] = product;
+        }
+        print('DEBUG: Successfully loaded ${products.length} products');
+        setState(() {}); // Trigger UI rebuild to display loaded items
+      } else {
+        if (mounted) {
+          // Use helper method to get user-friendly error message from result
+          final errorMsg =
+              _getUserFriendlyMessageFromResponse(resp) ??
+              'Failed to load items. Please try again.';
+          _showErrorDialog('Failed to Load Items', errorMsg);
+        }
+      }
+    } catch (e) {
+      print('Error loading items: $e');
+      if (mounted) {
+        final userFriendlyError = _getUserFriendlyError(e);
+        _showErrorDialog('Failed to Load Items', userFriendlyError);
       }
     }
   }

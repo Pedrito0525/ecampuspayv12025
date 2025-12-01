@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'dart:convert';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/session_service.dart';
 import '../services/supabase_service.dart';
 import '../services/encryption_service.dart';
-import 'dart:convert';
-import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' as excel;
 import 'package:path_provider/path_provider.dart';
@@ -42,6 +43,158 @@ class _ServiceReportsTabState extends State<ServiceReportsTab> {
       _loadServiceNames();
       _loadTransactions();
     });
+  }
+
+  /// Show error dialog with user-friendly message
+  void _showErrorDialog(String title, String message) {
+    if (!mounted) return;
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  color: Color(0xFFDC3545),
+                  size: 24,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: isMobile ? 18 : 20,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFFDC3545),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              message,
+              style: TextStyle(
+                fontSize: isMobile ? 14 : 16,
+                color: Colors.black87,
+              ),
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFDC3545),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'OK',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+    );
+  }
+
+  /// Get user-friendly message from service response
+  // ignore: unused_element
+  String? _getUserFriendlyMessageFromResponse(Map<String, dynamic>? response) {
+    if (response == null) return null;
+    
+    // If there's an error field, use it
+    if (response['error'] != null) {
+      return _getUserFriendlyError(response['error']);
+    }
+    
+    // If there's a message field, check if it contains technical details
+    if (response['message'] != null) {
+      final message = response['message'].toString();
+      final messageLower = message.toLowerCase();
+      if (messageLower.contains('client exception') ||
+          messageLower.contains('socket exception') ||
+          messageLower.contains('socketexception') ||
+          messageLower.contains('clientexception') ||
+          messageLower.contains('failed host lookup') ||
+          messageLower.contains('connection') ||
+          messageLower.contains('network') ||
+          messageLower.contains('timeout') ||
+          messageLower.contains('socket') ||
+          messageLower.contains('supabase') ||
+          messageLower.contains('http://') ||
+          messageLower.contains('https://')) {
+        // It's a technical error, convert it to user-friendly
+        return _getUserFriendlyError(message);
+      }
+      // It's already a user-friendly message, return as is
+      return message;
+    }
+    
+    return null;
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Failed to load data. Please try again later.';
+    }
+
+    // Check for other connection-related errors (including string messages)
+    final errorString = error.toString().toLowerCase();
+    
+    // Check for network-related error messages (including common variations)
+    if (errorString.contains('socket') ||
+        errorString.contains('socketexception') ||
+        errorString.contains('socket exception') ||
+        errorString.contains('client exception') ||
+        errorString.contains('clientexception') ||
+        errorString.contains('client_exception') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('no address associated') ||
+        errorString.contains('connection refused') ||
+        errorString.contains('connection reset')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Failed to load data. Please try again later.';
   }
 
   @override
@@ -825,9 +978,8 @@ class _ServiceReportsTabState extends State<ServiceReportsTab> {
       if (!mounted) return;
       // ignore: avoid_print
       print('DEBUG ReportsTab: load error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load transactions: $e')),
-      );
+      final userFriendlyError = _getUserFriendlyError(e);
+      _showErrorDialog('Failed to Load Transactions', userFriendlyError);
     } finally {
       // done
     }
@@ -1131,9 +1283,10 @@ class _ServiceReportsTabState extends State<ServiceReportsTab> {
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      if (mounted) {
+        final userFriendlyError = _getUserFriendlyError(e);
+        _showErrorDialog('Export Failed', userFriendlyError);
+      }
     }
   }
 
@@ -1370,9 +1523,10 @@ class _ServiceReportsTabState extends State<ServiceReportsTab> {
         includePurposeAndCode: includePurposeAndCode,
       );
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      if (mounted) {
+        final userFriendlyError = _getUserFriendlyError(e);
+        _showErrorDialog('Export Failed', userFriendlyError);
+      }
     }
   }
 
@@ -1647,20 +1801,24 @@ class _ServiceReportsTabState extends State<ServiceReportsTab> {
           ).showSnackBar(SnackBar(content: Text('CSV saved to: ${file.path}')));
           return;
         } catch (writeErr) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Failed to save: $writeErr')));
+          if (mounted) {
+            final userFriendlyError = _getUserFriendlyError(writeErr);
+            _showErrorDialog('Failed to Save CSV', userFriendlyError);
+          }
         }
       }
 
       // Final fallback
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save CSV file. Please try again.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save CSV file. Please try again.')),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('CSV export failed: $e')));
+      if (mounted) {
+        final userFriendlyError = _getUserFriendlyError(e);
+        _showErrorDialog('CSV Export Failed', userFriendlyError);
+      }
     }
   }
 
@@ -2110,20 +2268,24 @@ class _ServiceReportsTabState extends State<ServiceReportsTab> {
           );
           return;
         } catch (writeErr) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Failed to save: $writeErr')));
+          if (mounted) {
+            final userFriendlyError = _getUserFriendlyError(writeErr);
+            _showErrorDialog('Failed to Save Excel', userFriendlyError);
+          }
         }
       }
 
       // Final fallback
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save Excel file. Please try again.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save Excel file. Please try again.')),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Excel export failed: $e')));
+      if (mounted) {
+        final userFriendlyError = _getUserFriendlyError(e);
+        _showErrorDialog('Excel Export Failed', userFriendlyError);
+      }
     }
   }
 }

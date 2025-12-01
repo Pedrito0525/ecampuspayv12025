@@ -74,8 +74,10 @@ class _SettingsTabState extends State<SettingsTab> {
     'top_up_transactions',
     'withdrawal_requests',
     'withdrawal_transactions',
+    'service_withdrawal_requests',
     'user_transfers',
     'read_inbox',
+    'feedback',
     'loan_plans',
     'loan_applications',
     'active_loans',
@@ -93,10 +95,12 @@ class _SettingsTabState extends State<SettingsTab> {
     'top_up_transactions',
     'withdrawal_requests',
     'withdrawal_transactions',
+    'service_withdrawal_requests',
     'user_transfers',
     'service_transactions',
     'transaction_csu',
     'read_inbox',
+    'feedback',
     'loan_applications',
     'active_loans',
     'loan_payments',
@@ -114,8 +118,10 @@ class _SettingsTabState extends State<SettingsTab> {
     'withdrawal_transactions',
     'user_transfers',
     'read_inbox',
+    'feedback',
     'id_replacement',
     'withdrawal_requests',
+    'service_withdrawal_requests',
     'top_up_requests',
     'loan_plans', // Deleted after loan_applications
     'student_info',
@@ -133,10 +139,12 @@ class _SettingsTabState extends State<SettingsTab> {
     'top_up_transactions': 'id',
     'withdrawal_requests': 'id',
     'withdrawal_transactions': 'id',
+    'service_withdrawal_requests': 'id',
     'user_transfers': 'id',
     'service_transactions': 'id',
     'transaction_csu': 'id',
     'read_inbox': 'id',
+    'feedback': 'id',
     'loan_applications': 'id',
     'active_loans': 'id',
     'loan_payments': 'id',
@@ -261,6 +269,18 @@ class _SettingsTabState extends State<SettingsTab> {
       childTable: 'loan_applications',
       childColumn: 'loan_plan_id',
       parentTable: 'loan_plans',
+      parentColumn: 'id',
+    ),
+    _RecoveryForeignKey(
+      childTable: 'feedback',
+      childColumn: 'student_id',
+      parentTable: 'auth_students',
+      parentColumn: 'student_id',
+    ),
+    _RecoveryForeignKey(
+      childTable: 'service_withdrawal_requests',
+      childColumn: 'service_account_id',
+      parentTable: 'service_accounts',
       parentColumn: 'id',
     ),
   ];
@@ -2620,10 +2640,12 @@ class _SettingsTabState extends State<SettingsTab> {
     var headers = List<String>.from(columns);
     var dataRows = List<Map<String, dynamic>>.from(rows);
 
+    // If headers are empty but we have data rows, extract headers from first row
     if (headers.isEmpty && dataRows.isNotEmpty) {
       headers = dataRows.first.keys.map((key) => key.toString()).toList();
     }
 
+    // If headers are still empty (no columns from schema and no data), use fallback
     if (headers.isEmpty) {
       headers = ['info'];
       dataRows = [
@@ -2631,13 +2653,19 @@ class _SettingsTabState extends State<SettingsTab> {
       ];
     }
 
+    // Create CSV with headers (even if no data rows)
     final csvMatrix = <List<dynamic>>[];
-    csvMatrix.add(headers);
+    csvMatrix.add(headers); // Always include headers
+
+    // Add data rows if available
     for (final row in dataRows) {
       csvMatrix.add(
         headers.map((column) => _stringifyCsvValue(row[column])).toList(),
       );
     }
+
+    // If no data rows but we have headers, CSV will contain only the header row
+    // This preserves table structure even when empty
 
     final csvString = _csvConverter.convert(csvMatrix);
     return (bytes: utf8.encode(csvString), columnCount: headers.length);
@@ -2880,14 +2908,51 @@ class _SettingsTabState extends State<SettingsTab> {
         .toLowerCase()
         .replaceAll('.csv', '')
         .replaceAll(' ', '_');
-    for (final table in _backupTargetTables) {
+
+    // Sort tables by length (longest first) to match more specific names first
+    // This ensures "service_withdrawal_requests" matches before "withdrawal_requests"
+    final sortedTables = List<String>.from(_backupTargetTables)
+      ..sort((a, b) => b.length.compareTo(a.length));
+
+    // Try exact match first (most reliable)
+    for (final table in sortedTables) {
       final target = table.toLowerCase();
-      if (normalized == target ||
-          normalized.endsWith('_$target') ||
-          normalized.contains(target)) {
+      if (normalized == target) {
         return table;
       }
     }
+
+    // Try ends with pattern (e.g., backup_service_withdrawal_requests.csv)
+    // Check longer names first to avoid partial matches
+    for (final table in sortedTables) {
+      final target = table.toLowerCase();
+      if (normalized.endsWith('_$target') || normalized.endsWith(target)) {
+        return table;
+      }
+    }
+
+    // Try starts with pattern (e.g., service_withdrawal_requests_backup.csv)
+    for (final table in sortedTables) {
+      final target = table.toLowerCase();
+      if (normalized.startsWith('${target}_') ||
+          normalized.startsWith(target)) {
+        return table;
+      }
+    }
+
+    // Last resort: contains match with underscore boundaries
+    // This ensures "withdrawal_requests" doesn't match "service_withdrawal_requests"
+    for (final table in sortedTables) {
+      final target = table.toLowerCase();
+      // Check if target appears with underscore boundaries or at start/end
+      if (normalized.contains('_${target}_') ||
+          normalized.startsWith('${target}_') ||
+          normalized.endsWith('_$target') ||
+          normalized == target) {
+        return table;
+      }
+    }
+
     return null;
   }
 

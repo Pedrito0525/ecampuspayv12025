@@ -221,6 +221,33 @@ class SupabaseService {
       'created_at',
       'updated_at',
     ],
+    'feedback': [
+      'id',
+      'user_type',
+      'account_username',
+      'message',
+      'created_at',
+      'updated_at',
+    ],
+    'transaction_csu': [
+      'id',
+      'service_transactions_id',
+      'sequence_number',
+      'created_at',
+    ],
+    'service_withdrawal_requests': [
+      'id',
+      'service_account_id',
+      'amount',
+      'transfer_type',
+      'gcash_number',
+      'gcash_account_name',
+      'status',
+      'created_at',
+      'processed_at',
+      'processed_by',
+      'admin_notes',
+    ],
   };
 
   // Initialize Supabase client
@@ -2280,10 +2307,12 @@ for all to authenticated using (true) with check (true);
           studentIds.add(studentId);
         }
 
-        final int? serviceAccountId =
-            _coerceToInt(transaction['service_account_id']);
-        final int? destinationServiceId =
-            _coerceToInt(transaction['destination_service_id']);
+        final int? serviceAccountId = _coerceToInt(
+          transaction['service_account_id'],
+        );
+        final int? destinationServiceId = _coerceToInt(
+          transaction['destination_service_id'],
+        );
 
         if (serviceAccountId != null) {
           serviceAccountIds.add(serviceAccountId);
@@ -2426,10 +2455,12 @@ for all to authenticated using (true) with check (true);
 
       for (final transaction in withdrawalTransactions) {
         final String? studentId = transaction['student_id']?.toString();
-        final int? serviceAccountId =
-            _coerceToInt(transaction['service_account_id']);
-        final int? destinationServiceId =
-            _coerceToInt(transaction['destination_service_id']);
+        final int? serviceAccountId = _coerceToInt(
+          transaction['service_account_id'],
+        );
+        final int? destinationServiceId = _coerceToInt(
+          transaction['destination_service_id'],
+        );
 
         Map<String, dynamic>? metadata;
         final dynamic rawMetadata = transaction['metadata'];
@@ -2437,8 +2468,7 @@ for all to authenticated using (true) with check (true);
           metadata = Map<String, dynamic>.from(rawMetadata);
         }
 
-        final bool isServiceWithdrawal =
-            studentId == null || studentId.isEmpty;
+        final bool isServiceWithdrawal = studentId == null || studentId.isEmpty;
 
         String primaryName;
         String primaryId;
@@ -2462,7 +2492,8 @@ for all to authenticated using (true) with check (true);
           accountType = 'service';
         }
 
-        String vendorName = metadata?['destination_service_name']?.toString() ??
+        String vendorName =
+            metadata?['destination_service_name']?.toString() ??
             metadata?['service_name']?.toString() ??
             'Admin Withdrawal';
 
@@ -2473,9 +2504,10 @@ for all to authenticated using (true) with check (true);
         } else if (isServiceWithdrawal) {
           final destinationType =
               metadata?['destination_type']?.toString() ?? 'admin';
-          vendorName = destinationType.toLowerCase() == 'admin'
-              ? 'Admin Treasury'
-              : destinationType;
+          vendorName =
+              destinationType.toLowerCase() == 'admin'
+                  ? 'Admin Treasury'
+                  : destinationType;
         }
 
         combinedTransactions.add({
@@ -2487,16 +2519,15 @@ for all to authenticated using (true) with check (true);
           'student_id': primaryId,
           'status': 'completed',
           'category': 'withdrawal',
-          'transaction_type':
-              (transaction['transaction_type']?.toString() ?? 'withdrawal')
-                  .trim()
-                  .toLowerCase()
-                  .replaceAll(' ', '_'),
+          'transaction_type': (transaction['transaction_type']?.toString() ??
+                  'withdrawal')
+              .trim()
+              .toLowerCase()
+              .replaceAll(' ', '_'),
           'notes': metadata?['admin_notes']?.toString(),
           'previous_balance': null,
           'new_balance': null,
-          'processed_by':
-              metadata?['processed_by']?.toString() ?? vendorName,
+          'processed_by': metadata?['processed_by']?.toString() ?? vendorName,
           'account_type': accountType,
         });
       }
@@ -2838,10 +2869,7 @@ for all to authenticated using (true) with check (true);
       }
 
       // Use Supabase Auth to resend confirmation email
-      await client.auth.resend(
-        type: OtpType.signup,
-        email: normalizedEmail,
-      );
+      await client.auth.resend(type: OtpType.signup, email: normalizedEmail);
 
       return {
         'success': true,
@@ -2859,8 +2887,7 @@ for all to authenticated using (true) with check (true);
       }
       return {
         'success': false,
-        'message':
-            'Failed to send confirmation email. Please try again later.',
+        'message': 'Failed to send confirmation email. Please try again later.',
         'error': e.toString(),
       };
     }
@@ -3074,11 +3101,12 @@ for all to authenticated using (true) with check (true);
       final normalizedEmail = email.trim().toLowerCase();
 
       // Check if email exists in service_accounts table
-      final serviceAccountResult = await adminClient
-          .from('service_accounts')
-          .select('id, email, service_name, is_active')
-          .eq('email', normalizedEmail)
-          .maybeSingle();
+      final serviceAccountResult =
+          await adminClient
+              .from('service_accounts')
+              .select('id, email, service_name, is_active')
+              .eq('email', normalizedEmail)
+              .maybeSingle();
 
       if (serviceAccountResult == null) {
         return {
@@ -3196,7 +3224,9 @@ for all to authenticated using (true) with check (true);
       // This is the primary authentication system
       try {
         await client.auth.updateUser(UserAttributes(password: newPassword));
-        print('DEBUG: Password updated in auth.users for service account email: $normalizedEmail');
+        print(
+          'DEBUG: Password updated in auth.users for service account email: $normalizedEmail',
+        );
       } catch (updateError) {
         final errorString = updateError.toString().toLowerCase();
         if (errorString.contains('session') ||
@@ -3223,11 +3253,12 @@ for all to authenticated using (true) with check (true);
       // Step 2: Update password in service_accounts table (mirror table)
       // This ensures consistency between Supabase Auth and your custom table
       try {
-        final serviceAccountResult = await adminClient
-            .from('service_accounts')
-            .select('id, email')
-            .eq('email', normalizedEmail)
-            .maybeSingle();
+        final serviceAccountResult =
+            await adminClient
+                .from('service_accounts')
+                .select('id, email')
+                .eq('email', normalizedEmail)
+                .maybeSingle();
 
         if (serviceAccountResult != null) {
           final serviceAccountId = serviceAccountResult['id'];
@@ -4616,11 +4647,12 @@ for all to authenticated using (true) with check (true);
       // Check if user already exists in auth.users
       Map<String, dynamic>? authUserRecord;
       try {
-        authUserRecord = await adminClient
-            .from('auth.users')
-            .select('id, email_confirmed_at')
-            .eq('email', normalizedEmail)
-            .maybeSingle();
+        authUserRecord =
+            await adminClient
+                .from('auth.users')
+                .select('id, email_confirmed_at')
+                .eq('email', normalizedEmail)
+                .maybeSingle();
       } catch (e) {
         // If query fails, continue to create new user
         print('DEBUG: Could not check existing auth user: $e');
@@ -4633,7 +4665,8 @@ for all to authenticated using (true) with check (true);
             AdminUserAttributes(
               email: normalizedEmail,
               password: password,
-              emailConfirm: true, // Auto-confirm email, no need for service account to confirm
+              emailConfirm:
+                  true, // Auto-confirm email, no need for service account to confirm
               userMetadata: {
                 'role': 'service_account',
                 'service_name': serviceName.trim(),
@@ -4646,7 +4679,8 @@ for all to authenticated using (true) with check (true);
             return {
               'success': false,
               'error': 'Failed to create auth user',
-              'message': 'Failed to create Supabase Auth user for service account.',
+              'message':
+                  'Failed to create Supabase Auth user for service account.',
             };
           }
 
@@ -4663,7 +4697,8 @@ for all to authenticated using (true) with check (true);
             return {
               'success': false,
               'error': authError.toString(),
-              'message': 'Email already exists in auth system: $normalizedEmail',
+              'message':
+                  'Email already exists in auth system: $normalizedEmail',
             };
           }
           // Re-throw if it's a different error
@@ -5097,7 +5132,8 @@ for all to authenticated using (true) with check (true);
       // Fast check: only verify if transactions exist (limit 1 query - very fast)
       final transactionCheck = await checkServiceAccountHasTransactions(
         accountId: accountId,
-        includeCount: false, // Don't count all transactions - just check if any exist
+        includeCount:
+            false, // Don't count all transactions - just check if any exist
       );
 
       if (transactionCheck['success'] == true &&

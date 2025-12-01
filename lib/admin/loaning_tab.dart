@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 import '../services/encryption_service.dart';
 
@@ -120,7 +122,7 @@ class _LoaningTabState extends State<LoaningTab> {
         }
       }
     } catch (e) {
-      _error = e.toString();
+      _error = _getUserFriendlyError(e);
       print('Error loading loan data: $e');
     } finally {
       if (mounted) {
@@ -538,6 +540,51 @@ class _LoaningTabState extends State<LoaningTab> {
   // Helper methods
   String _formatDate(DateTime date) {
     return '${date.day}/${date.month}/${date.year}';
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Failed to load loan data. Please try again later.';
+    }
+
+    // Check for other connection-related errors
+    final errorString = error.toString().toLowerCase();
+
+    // Check for network-related error messages
+    if (errorString.contains('socket') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('no address associated') ||
+        errorString.contains('client exception')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Failed to load loan data. Please try again later.';
   }
 
   // --------- LOAN PLAN CRUD ---------

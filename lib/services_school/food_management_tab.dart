@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/session_service.dart';
 import '../services/supabase_service.dart';
 
@@ -727,23 +729,18 @@ class _FoodManagementTabState extends State<FoodManagementTab> {
                     );
                   } else {
                     Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          deleteResult['message'] ?? 'Failed to delete item',
-                        ),
-                        backgroundColor: const Color(0xFFDC3545),
-                      ),
-                    );
+                    if (mounted) {
+                      final errorMsg = _getUserFriendlyMessageFromResponse(deleteResult) ??
+                          'Failed to delete item. Please try again.';
+                      _showErrorDialog('Failed to Delete Item', errorMsg);
+                    }
                   }
                 } catch (e) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Failed to delete item: ${e.toString()}'),
-                      backgroundColor: const Color(0xFFDC3545),
-                    ),
-                  );
+                  if (mounted) {
+                    final userFriendlyError = _getUserFriendlyError(e);
+                    _showErrorDialog('Failed to Delete Item', userFriendlyError);
+                  }
                 }
               },
               child: const Text(
@@ -1314,7 +1311,9 @@ class _FoodManagementTabState extends State<FoodManagementTab> {
           operationalType: operationalType, // For sub-account validation
         );
         if (!(resp['success'] == true)) {
-          throw Exception(resp['message'] ?? 'Update failed');
+          final errorMsg = _getUserFriendlyMessageFromResponse(resp) ??
+              'Update failed. Please try again.';
+          throw Exception(errorMsg);
         }
         saved = resp['data'];
       } else {
@@ -1329,7 +1328,9 @@ class _FoodManagementTabState extends State<FoodManagementTab> {
               serviceName, // Pass service_name for Campus Service Units
         );
         if (!(resp['success'] == true)) {
-          throw Exception(resp['message'] ?? 'Create failed');
+          final errorMsg = _getUserFriendlyMessageFromResponse(resp) ??
+              'Create failed. Please try again.';
+          throw Exception(errorMsg);
         }
         saved = resp['data'];
       }
@@ -1370,19 +1371,17 @@ class _FoodManagementTabState extends State<FoodManagementTab> {
         await _showAddResultDialog(success: true, name: name);
       }
     } catch (e) {
-      if (isEdit) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Save failed: ${e.toString()}'),
-            backgroundColor: const Color(0xFFDC3545),
-          ),
-        );
-      } else {
-        await _showAddResultDialog(
-          success: false,
-          name: name,
-          errorMessage: e.toString(),
-        );
+      if (mounted) {
+        final userFriendlyError = _getUserFriendlyError(e);
+        if (isEdit) {
+          _showErrorDialog('Save Failed', userFriendlyError);
+        } else {
+          await _showAddResultDialog(
+            success: false,
+            name: name,
+            errorMessage: userFriendlyError,
+          );
+        }
       }
     }
   }
@@ -1444,78 +1443,243 @@ class _FoodManagementTabState extends State<FoodManagementTab> {
     _loadItems();
   }
 
+  /// Show error dialog with user-friendly message
+  void _showErrorDialog(String title, String message) {
+    if (!mounted) return;
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  color: Color(0xFFDC3545),
+                  size: 24,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: isMobile ? 18 : 20,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFFDC3545),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              message,
+              style: TextStyle(
+                fontSize: isMobile ? 14 : 16,
+                color: Colors.black87,
+              ),
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFDC3545),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'OK',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+    );
+  }
+
+  /// Get user-friendly message from service response
+  /// Handles both error objects and service response maps
+  String? _getUserFriendlyMessageFromResponse(Map<String, dynamic>? response) {
+    if (response == null) return null;
+    
+    // If there's an error field, use it
+    if (response['error'] != null) {
+      return _getUserFriendlyError(response['error']);
+    }
+    
+    // If there's a message field, check if it contains technical details
+    if (response['message'] != null) {
+      final message = response['message'].toString();
+      // Check if message contains technical error details
+      final messageLower = message.toLowerCase();
+      if (messageLower.contains('client exception') ||
+          messageLower.contains('socket exception') ||
+          messageLower.contains('socketexception') ||
+          messageLower.contains('clientexception') ||
+          messageLower.contains('failed host lookup') ||
+          messageLower.contains('connection') ||
+          messageLower.contains('network') ||
+          messageLower.contains('timeout') ||
+          messageLower.contains('socket') ||
+          messageLower.contains('supabase') ||
+          messageLower.contains('http://') ||
+          messageLower.contains('https://')) {
+        // It's a technical error, convert it to user-friendly
+        return _getUserFriendlyError(message);
+      }
+      // It's already a user-friendly message, return as is
+      return message;
+    }
+    
+    return null;
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Failed to load items. Please try again later.';
+    }
+
+    // Check for other connection-related errors (including string messages)
+    final errorString = error.toString().toLowerCase();
+    
+    // Check for network-related error messages (including common variations)
+    if (errorString.contains('socket') ||
+        errorString.contains('socketexception') ||
+        errorString.contains('socket exception') ||
+        errorString.contains('client exception') ||
+        errorString.contains('clientexception') ||
+        errorString.contains('client_exception') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('no address associated') ||
+        errorString.contains('connection refused') ||
+        errorString.contains('connection reset')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Failed to load items. Please try again later.';
+  }
+
   Future<void> _loadItems() async {
     setState(() {
       _loading = true;
     });
 
-    final serviceIdStr =
-        SessionService.currentUserData?['service_id']?.toString() ?? '0';
-    final operationalType =
-        SessionService.currentUserData?['operational_type']?.toString() ??
-        'Main';
-    final mainServiceIdStr =
-        SessionService.currentUserData?['main_service_id']?.toString();
-    final serviceId = int.tryParse(serviceIdStr) ?? 0;
-    final mainServiceId = int.tryParse(mainServiceIdStr ?? '');
+    try {
+      final serviceIdStr =
+          SessionService.currentUserData?['service_id']?.toString() ?? '0';
+      final operationalType =
+          SessionService.currentUserData?['operational_type']?.toString() ??
+          'Main';
+      final mainServiceIdStr =
+          SessionService.currentUserData?['main_service_id']?.toString();
+      final serviceId = int.tryParse(serviceIdStr) ?? 0;
+      final mainServiceId = int.tryParse(mainServiceIdStr ?? '');
 
-    final resp = await SupabaseService.getEffectivePaymentItems(
-      serviceAccountId: serviceId,
-      operationalType: operationalType,
-      mainServiceId: mainServiceId,
-    );
-
-    if (resp['success'] == true) {
-      final List data = resp['data'] as List;
-      final parsed =
-          data.map<Map<String, dynamic>>((raw) {
-            return {
-              'id': raw['id'],
-              'name': raw['name'],
-              'price': (raw['base_price'] as num).toDouble(),
-              'category': raw['category'],
-              'hasSizes': raw['has_sizes'] == true,
-              if (raw['size_options'] != null)
-                'sizes': (raw['size_options'] as Map).entries
-                    .map((e) => '${e.key},${e.value}')
-                    .join('\n'),
-            };
-          }).toList();
-
-      setState(() {
-        // Split into lists by category group
-        foodItems =
-            parsed
-                .where(
-                  (p) => ['Food', 'Drinks', 'Desserts'].contains(p['category']),
-                )
-                .toList();
-        services =
-            parsed
-                .where(
-                  (p) =>
-                      ['Services', 'Documents', 'Fees'].contains(p['category']),
-                )
-                .toList();
-        merchandise =
-            parsed
-                .where(
-                  (p) =>
-                      ['School Items', 'Merchandise'].contains(p['category']),
-                )
-                .toList();
-        _loading = false;
-      });
-    } else {
-      setState(() {
-        _loading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to load items: ${resp['message'] ?? ''}'),
-          backgroundColor: const Color(0xFFDC3545),
-        ),
+      final resp = await SupabaseService.getEffectivePaymentItems(
+        serviceAccountId: serviceId,
+        operationalType: operationalType,
+        mainServiceId: mainServiceId,
       );
+
+      if (resp['success'] == true) {
+        final List data = resp['data'] as List;
+        final parsed =
+            data.map<Map<String, dynamic>>((raw) {
+              return {
+                'id': raw['id'],
+                'name': raw['name'],
+                'price': (raw['base_price'] as num).toDouble(),
+                'category': raw['category'],
+                'hasSizes': raw['has_sizes'] == true,
+                if (raw['size_options'] != null)
+                  'sizes': (raw['size_options'] as Map).entries
+                      .map((e) => '${e.key},${e.value}')
+                      .join('\n'),
+              };
+            }).toList();
+
+        setState(() {
+          // Split into lists by category group
+          foodItems =
+              parsed
+                  .where(
+                    (p) => ['Food', 'Drinks', 'Desserts'].contains(p['category']),
+                  )
+                  .toList();
+          services =
+              parsed
+                  .where(
+                    (p) =>
+                        ['Services', 'Documents', 'Fees'].contains(p['category']),
+                  )
+                  .toList();
+          merchandise =
+              parsed
+                  .where(
+                    (p) =>
+                        ['School Items', 'Merchandise'].contains(p['category']),
+                  )
+                  .toList();
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _loading = false;
+        });
+        if (mounted) {
+          // Use helper method to get user-friendly error message from result
+          final errorMsg =
+              _getUserFriendlyMessageFromResponse(resp) ??
+              'Failed to load items. Please try again.';
+          _showErrorDialog('Failed to Load Items', errorMsg);
+        }
+      }
+    } catch (e) {
+      print('Error loading items: $e');
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+        final userFriendlyError = _getUserFriendlyError(e);
+        _showErrorDialog('Failed to Load Items', userFriendlyError);
+      }
     }
   }
 }

@@ -4,6 +4,7 @@ import 'dart:io';
 // removed unused: import 'package:http/http.dart' as http;
 // removed unused: import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'security_privacy_screen.dart';
 import 'withdraw_screen.dart';
 import 'loan_application_screen.dart';
@@ -1183,7 +1184,12 @@ class _HomeTabState extends State<_HomeTab> {
           ),
           Text(
             SessionService.currentUserName,
-            style: const TextStyle(color: Colors.white70, fontSize: 16),
+            style: const TextStyle(
+              fontFamily: 'Poppins',
+              fontWeight: FontWeight.w600,
+              color: Colors.white70,
+              fontSize: 16,
+            ),
           ),
         ],
       ),
@@ -2273,7 +2279,8 @@ class _HomeTabState extends State<_HomeTab> {
         _showErrorSnackBar(data['message'] ?? 'Failed to pay loan');
       }
     } catch (e) {
-      _showErrorSnackBar('Error paying loan: ${e.toString()}');
+      final userFriendlyError = _getUserFriendlyError(e);
+      _showErrorSnackBar('Error paying loan: $userFriendlyError');
     }
   }
 
@@ -4022,7 +4029,8 @@ class _HomeTabState extends State<_HomeTab> {
             ),
       );
     } catch (e) {
-      _showErrorSnackBar('Error loading loan plans: ${e.toString()}');
+      final userFriendlyError = _getUserFriendlyError(e);
+      _showErrorSnackBar('Error loading loan plans: $userFriendlyError');
     }
   }
 
@@ -4056,8 +4064,60 @@ class _HomeTabState extends State<_HomeTab> {
         _showErrorSnackBar(data['message'] ?? 'Failed to apply for loan');
       }
     } catch (e) {
-      _showErrorSnackBar('Error applying for loan: ${e.toString()}');
+      final userFriendlyError = _getUserFriendlyError(e);
+      _showErrorSnackBar('Error applying for loan: $userFriendlyError');
     }
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Failed to load data. Please try again later.';
+    }
+
+    // Check for other connection-related errors (including string messages)
+    final errorString = error.toString().toLowerCase();
+
+    // Check for network-related error messages (including common variations)
+    if (errorString.contains('socket') ||
+        errorString.contains('socketexception') ||
+        errorString.contains('socket exception') ||
+        errorString.contains('client exception') ||
+        errorString.contains('clientexception') ||
+        errorString.contains('client_exception') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('no address associated') ||
+        errorString.contains('connection refused') ||
+        errorString.contains('connection reset')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Failed to load data. Please try again later.';
   }
 
   void _showErrorSnackBar(String message) {

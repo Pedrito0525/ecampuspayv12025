@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:async';
 import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/esp32_bluetoothv2_service.dart';
 import '../services/supabase_service.dart';
 import '../services/session_service.dart';
@@ -79,6 +80,8 @@ class _UserManagementTabState extends State<UserManagementTab> {
   Future<Map<String, dynamic>>? _cachedRecentRFIDListFuture;
   Key _userDirectoryKey = UniqueKey();
   Future<Map<String, dynamic>>? _cachedUserDirectoryFuture;
+  Key _userActivityKey = UniqueKey();
+  Future<List<Map<String, dynamic>>>? _cachedUserTransfersFuture;
 
   @override
   void initState() {
@@ -263,7 +266,9 @@ class _UserManagementTabState extends State<UserManagementTab> {
 
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Error validating RFID: $e'),
+                content: Text(
+                  'Error validating RFID: ${_getUserFriendlyError(e)}',
+                ),
                 backgroundColor: Colors.red,
                 duration: const Duration(seconds: 4),
               ),
@@ -1542,7 +1547,9 @@ class _UserManagementTabState extends State<UserManagementTab> {
                 children: [
                   const Icon(Icons.error, color: Colors.red, size: 48),
                   const SizedBox(height: 16),
-                  Text('Error loading recent registrations: ${snapshot.error}'),
+                  Text(
+                    'Error loading recent registrations: ${_getUserFriendlyError(snapshot.error)}',
+                  ),
                 ],
               ),
             ),
@@ -1570,7 +1577,7 @@ class _UserManagementTabState extends State<UserManagementTab> {
                   const Icon(Icons.warning, color: Colors.orange, size: 48),
                   const SizedBox(height: 16),
                   Text(
-                    snapshot.data?['message'] ??
+                    _getUserFriendlyMessageFromResponse(snapshot.data) ??
                         'Failed to load recent registrations',
                   ),
                 ],
@@ -2144,7 +2151,7 @@ class _UserManagementTabState extends State<UserManagementTab> {
                   const Icon(Icons.warning, color: Colors.orange, size: 48),
                   const SizedBox(height: 16),
                   Text(
-                    snapshot.data?['message'] ??
+                    _getUserFriendlyMessageFromResponse(snapshot.data) ??
                         'Failed to load recent RFID cards',
                     textAlign: TextAlign.center,
                   ),
@@ -2395,7 +2402,9 @@ class _UserManagementTabState extends State<UserManagementTab> {
                 children: [
                   const Icon(Icons.error, color: Colors.red, size: 48),
                   const SizedBox(height: 16),
-                  Text('Error loading users: ${snapshot.error}'),
+                  Text(
+                    'Error loading users: ${_getUserFriendlyError(snapshot.error)}',
+                  ),
                   const SizedBox(height: 16),
                   ElevatedButton(
                     onPressed: () {
@@ -2418,7 +2427,10 @@ class _UserManagementTabState extends State<UserManagementTab> {
                 children: [
                   const Icon(Icons.warning, color: Colors.orange, size: 48),
                   const SizedBox(height: 16),
-                  Text(snapshot.data?['message'] ?? 'Failed to load users'),
+                  Text(
+                    _getUserFriendlyMessageFromResponse(snapshot.data) ??
+                        'Failed to load users',
+                  ),
                   const SizedBox(height: 16),
                   ElevatedButton(
                     onPressed: () {
@@ -2767,53 +2779,856 @@ class _UserManagementTabState extends State<UserManagementTab> {
   }
 
   Widget _buildUserActivity() {
-    return SingleChildScrollView(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              onPressed: () => setState(() => _selectedFunction = -1),
+              icon: const Icon(Icons.arrow_back, color: evsuRed),
+            ),
+            const Text(
+              'User Activity',
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w700,
+                color: Colors.black87,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 30),
+
+        Expanded(child: _buildUserActivityContent()),
+      ],
+    );
+  }
+
+  Widget _buildUserActivityContent() {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      key: _userActivityKey,
+      future: _getUserTransfersFuture(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Loading user transfers...'),
+                ],
+              ),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error, color: Colors.red, size: 48),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Error loading transfers: ${_getUserFriendlyError(snapshot.error)}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      _refreshUserActivity();
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final transfers = snapshot.data ?? [];
+
+        if (transfers.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.swap_horiz, size: 48, color: Colors.grey.shade400),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No transfer activity',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'No user-to-user transfers have been recorded yet.',
+                    style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isMobile = constraints.maxWidth < 600;
+
+                  if (isMobile) {
+                    // Mobile: Stack vertically
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'User Transfer Activity',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: evsuRed.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '${transfers.length} Transfer${transfers.length != 1 ? 's' : ''}',
+                                style: TextStyle(
+                                  color: evsuRed,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.refresh,
+                                color: evsuRed,
+                                size: 20,
+                              ),
+                              onPressed: _refreshUserActivity,
+                              tooltip: 'Refresh Transfers',
+                              padding: const EdgeInsets.all(6),
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                  }
+
+                  // Desktop: Horizontal layout
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'User Transfer Activity',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: evsuRed.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '${transfers.length} Transfer${transfers.length != 1 ? 's' : ''}',
+                              style: TextStyle(
+                                color: evsuRed,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          IconButton(
+                            icon: const Icon(Icons.refresh, color: evsuRed),
+                            onPressed: _refreshUserActivity,
+                            tooltip: 'Refresh Transfers',
+                            padding: const EdgeInsets.all(8),
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 20),
+              // Table view - use expanded to fill available space
+              Expanded(
+                child:
+                    transfers.isEmpty
+                        ? const Center(child: Text('No transfers to display'))
+                        : LayoutBuilder(
+                          builder: (context, constraints) {
+                            final screenWidth =
+                                MediaQuery.of(context).size.width;
+                            final isMobileLayout = screenWidth < 600;
+
+                            return SingleChildScrollView(
+                              scrollDirection: Axis.vertical,
+                              child:
+                                  isMobileLayout
+                                      ? Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 0,
+                                        ),
+                                        child: _buildTransfersTable(transfers),
+                                      )
+                                      : SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        child: _buildTransfersTable(transfers),
+                                      ),
+                            );
+                          },
+                        ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Get cached or create new future for user transfers
+  Future<List<Map<String, dynamic>>> _getUserTransfersFuture() {
+    _cachedUserTransfersFuture ??= _fetchUserTransfers();
+    return _cachedUserTransfersFuture!;
+  }
+
+  /// Refresh user activity independently
+  void _refreshUserActivity() {
+    if (!mounted) return;
+
+    // Clear cached future to force refresh
+    _cachedUserTransfersFuture = null;
+
+    // Smoothly refresh by updating the key after a short delay
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() {
+          _userActivityKey = UniqueKey();
+          // Create new future when key changes
+          _cachedUserTransfersFuture = _fetchUserTransfers();
+        });
+      }
+    });
+  }
+
+  /// Fetch user transfers with student names
+  Future<List<Map<String, dynamic>>> _fetchUserTransfers() async {
+    try {
+      await SupabaseService.initialize();
+
+      print('DEBUG: Fetching user transfers...');
+
+      // Fetch all user transfers using adminClient
+      final transfers = await SupabaseService.adminClient
+          .from('user_transfers')
+          .select('*')
+          .order('created_at', ascending: false)
+          .limit(100);
+
+      print('DEBUG: Found ${transfers.length} transfers');
+
+      // Fetch student names for all unique student IDs
+      final studentIds = <String>{};
+      for (var transfer in transfers) {
+        studentIds.add(transfer['sender_student_id']?.toString() ?? '');
+        studentIds.add(transfer['recipient_student_id']?.toString() ?? '');
+      }
+      studentIds.remove('');
+
+      print('DEBUG: Unique student IDs: ${studentIds.length}');
+
+      // Fetch student data to get names
+      final Map<String, Map<String, dynamic>> studentDataMap = {};
+      if (studentIds.isNotEmpty) {
+        try {
+          final students = await SupabaseService.adminClient
+              .from('auth_students')
+              .select('student_id, name')
+              .inFilter('student_id', studentIds.toList());
+
+          print('DEBUG: Fetched ${students.length} student records');
+
+          for (var student in students) {
+            final studentId = student['student_id']?.toString() ?? '';
+            if (studentId.isNotEmpty) {
+              // Decrypt name if needed
+              final decryptedData = EncryptionService.decryptUserData(student);
+              studentDataMap[studentId] = {
+                'name': decryptedData['name'] ?? 'N/A',
+                'student_id': studentId,
+              };
+            }
+          }
+        } catch (e) {
+          print('Error fetching student names: $e');
+        }
+      }
+
+      // Combine transfer data with student names
+      final List<Map<String, dynamic>> enrichedTransfers = [];
+      for (var transfer in transfers) {
+        final senderId = transfer['sender_student_id']?.toString() ?? '';
+        final recipientId = transfer['recipient_student_id']?.toString() ?? '';
+
+        enrichedTransfers.add({
+          'id': transfer['id'],
+          'sender_student_id': senderId,
+          'sender_name': studentDataMap[senderId]?['name'] ?? 'N/A',
+          'recipient_student_id': recipientId,
+          'recipient_name': studentDataMap[recipientId]?['name'] ?? 'N/A',
+          'amount': transfer['amount'],
+          'status': transfer['status'] ?? 'completed',
+          'created_at': transfer['created_at'],
+        });
+      }
+
+      print('DEBUG: Returning ${enrichedTransfers.length} enriched transfers');
+      return enrichedTransfers;
+    } catch (e) {
+      print('Error fetching user transfers: $e');
+      throw e;
+    }
+  }
+
+  /// Get user-friendly message from service response
+  /// Handles both error objects and service response maps
+  String? _getUserFriendlyMessageFromResponse(Map<String, dynamic>? response) {
+    if (response == null) return null;
+
+    // If there's an error field, use it
+    if (response['error'] != null) {
+      return _getUserFriendlyError(response['error']);
+    }
+
+    // If there's a message field, check if it contains technical details
+    if (response['message'] != null) {
+      final message = response['message'].toString();
+      // Check if message contains technical error details
+      final messageLower = message.toLowerCase();
+      if (messageLower.contains('client exception') ||
+          messageLower.contains('socket exception') ||
+          messageLower.contains('failed host lookup') ||
+          messageLower.contains('connection') ||
+          messageLower.contains('network') ||
+          messageLower.contains('timeout') ||
+          messageLower.contains('socket') ||
+          messageLower.contains('supabase') ||
+          messageLower.contains('http://') ||
+          messageLower.contains('https://')) {
+        // It's a technical error, convert it to user-friendly
+        return _getUserFriendlyError(message);
+      }
+      // It's already a user-friendly message, return as is
+      return message;
+    }
+
+    return null;
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Failed to load data. Please try again later.';
+    }
+
+    // Check for other connection-related errors
+    final errorString = error.toString().toLowerCase();
+
+    // Check for network-related error messages
+    if (errorString.contains('socket') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('no address associated') ||
+        errorString.contains('client exception')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Failed to load data. Please try again later.';
+  }
+
+  /// Build transfers table
+  Widget _buildTransfersTable(List<Map<String, dynamic>> transfers) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+
+    print(
+      'DEBUG: Building transfers table with ${transfers.length} transfers, isMobile: $isMobile',
+    );
+    print(
+      'DEBUG: First transfer sample: ${transfers.isNotEmpty ? transfers.first : 'No transfers'}',
+    );
+
+    if (isMobile) {
+      // Mobile: Card-based layout
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children:
+            transfers.map((transfer) {
+              print('DEBUG: Building card for transfer: ${transfer['id']}');
+              return _buildTransferCard(transfer);
+            }).toList(),
+      );
+    }
+
+    // Desktop: Table layout
+    return DataTable(
+      columnSpacing: 20,
+      horizontalMargin: 12,
+      dataRowMinHeight: 60,
+      dataRowMaxHeight: 100,
+      headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+      columns: const [
+        DataColumn(
+          label: Text(
+            'Date & Time',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+        DataColumn(
+          label: Text(
+            'From (Sender)',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+        DataColumn(
+          label: Text(
+            'To (Recipient)',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+        DataColumn(
+          label: Text('Amount', style: TextStyle(fontWeight: FontWeight.w600)),
+        ),
+        DataColumn(
+          label: Text('Status', style: TextStyle(fontWeight: FontWeight.w600)),
+        ),
+      ],
+      rows:
+          transfers.map((transfer) {
+            final createdAt = transfer['created_at']?.toString() ?? '';
+            final formattedDate = _formatTransferDate(createdAt);
+            final senderName = transfer['sender_name']?.toString() ?? 'N/A';
+            final senderId = transfer['sender_student_id']?.toString() ?? 'N/A';
+            final recipientName =
+                transfer['recipient_name']?.toString() ?? 'N/A';
+            final recipientId =
+                transfer['recipient_student_id']?.toString() ?? 'N/A';
+            final amount = (transfer['amount'] as num?)?.toDouble() ?? 0.0;
+            final status = transfer['status']?.toString() ?? 'completed';
+
+            return DataRow(
+              cells: [
+                DataCell(Text(formattedDate)),
+                DataCell(
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        senderName,
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                      Text(
+                        'ID: $senderId',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                DataCell(
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        recipientName,
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                      Text(
+                        'ID: $recipientId',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                DataCell(
+                  Text(
+                    '₱${amount.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: evsuRed,
+                    ),
+                  ),
+                ),
+                DataCell(
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          status == 'completed'
+                              ? Colors.green.shade100
+                              : status == 'failed'
+                              ? Colors.red.shade100
+                              : Colors.orange.shade100,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      status.toUpperCase(),
+                      style: TextStyle(
+                        color:
+                            status == 'completed'
+                                ? Colors.green.shade700
+                                : status == 'failed'
+                                ? Colors.red.shade700
+                                : Colors.orange.shade700,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }).toList(),
+    );
+  }
+
+  /// Build transfer card for mobile view
+  Widget _buildTransferCard(Map<String, dynamic> transfer) {
+    final createdAt = transfer['created_at']?.toString() ?? '';
+    final formattedDate = _formatTransferDate(createdAt);
+    final senderName = transfer['sender_name']?.toString() ?? 'N/A';
+    final senderId = transfer['sender_student_id']?.toString() ?? 'N/A';
+    final recipientName = transfer['recipient_name']?.toString() ?? 'N/A';
+    final recipientId = transfer['recipient_student_id']?.toString() ?? 'N/A';
+    final amount = (transfer['amount'] as num?)?.toDouble() ?? 0.0;
+    final status = transfer['status']?.toString() ?? 'completed';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              IconButton(
-                onPressed: () => setState(() => _selectedFunction = -1),
-                icon: const Icon(Icons.arrow_back, color: evsuRed),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.arrow_forward, size: 16, color: evsuRed),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Transfer',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: evsuRed,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      formattedDate,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const Text(
-                'User Activity',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black87,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color:
+                      status == 'completed'
+                          ? Colors.green.shade100
+                          : status == 'failed'
+                          ? Colors.red.shade100
+                          : Colors.orange.shade100,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  status.toUpperCase(),
+                  style: TextStyle(
+                    color:
+                        status == 'completed'
+                            ? Colors.green.shade700
+                            : status == 'failed'
+                            ? Colors.red.shade700
+                            : Colors.orange.shade700,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 30),
-
-          _buildUserActivityContent(),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'From',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      senderName,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'ID: $senderId',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.arrow_forward, color: evsuRed, size: 20),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'To',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      recipientName,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'ID: $recipientId',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: evsuRed.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Amount:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                ),
+                Text(
+                  '₱${amount.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: evsuRed,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildUserActivityContent() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: const Text(
-        'User activity logs, transaction history, and usage analytics would be displayed here.',
-        style: TextStyle(fontSize: 16, color: Colors.grey),
-      ),
-    );
+  /// Format transfer date for display
+  String _formatTransferDate(String dateString) {
+    try {
+      final date = DateTime.parse(dateString);
+      final localDate = date.toLocal();
+      final now = DateTime.now();
+      final difference = now.difference(localDate);
+
+      if (difference.inDays == 0) {
+        if (difference.inHours == 0) {
+          if (difference.inMinutes == 0) {
+            return 'Just now';
+          }
+          return '${difference.inMinutes} minute${difference.inMinutes != 1 ? 's' : ''} ago';
+        }
+        return '${difference.inHours} hour${difference.inHours != 1 ? 's' : ''} ago';
+      } else if (difference.inDays == 1) {
+        return 'Yesterday ${localDate.hour.toString().padLeft(2, '0')}:${localDate.minute.toString().padLeft(2, '0')}';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays} day${difference.inDays != 1 ? 's' : ''} ago';
+      } else {
+        return '${localDate.day}/${localDate.month}/${localDate.year} ${localDate.hour.toString().padLeft(2, '0')}:${localDate.minute.toString().padLeft(2, '0')}';
+      }
+    } catch (e) {
+      return 'N/A';
+    }
   }
 
   // Helper methods
@@ -3815,7 +4630,9 @@ class _UserManagementTabState extends State<UserManagementTab> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error fetching student data: $e'),
+          content: Text(
+            'Error fetching student data: ${_getUserFriendlyError(e)}',
+          ),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 3),
         ),
@@ -4510,7 +5327,7 @@ class _UserManagementTabState extends State<UserManagementTab> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error reading CSV file: $e'),
+          content: Text('Error reading CSV file: ${_getUserFriendlyError(e)}'),
           backgroundColor: Colors.red,
         ),
       );
@@ -5002,7 +5819,9 @@ class _UserManagementTabState extends State<UserManagementTab> {
         builder:
             (context) => AlertDialog(
               title: const Text('Unexpected Error'),
-              content: Text('An unexpected error occurred: ${e.toString()}'),
+              content: Text(
+                'An unexpected error occurred: ${_getUserFriendlyError(e)}',
+              ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
@@ -5874,7 +6693,9 @@ class _UserManagementTabState extends State<UserManagementTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error fetching student data: $e'),
+            content: Text(
+              'Error fetching student data: ${_getUserFriendlyError(e)}',
+            ),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 3),
           ),

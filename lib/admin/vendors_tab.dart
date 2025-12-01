@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 
 class VendorsTab extends StatefulWidget {
@@ -51,8 +53,10 @@ class _VendorsTabState extends State<VendorsTab> {
   // Analytics state variables
   Map<String, dynamic>? _analyticsData;
   bool _isLoadingAnalytics = false;
+  String? _analyticsError;
   String _selectedDateFilter = 'month';
   String _selectedCategoryFilter = 'all';
+  bool _hasAttemptedAnalyticsLoad = false; // Track if we've attempted initial load
 
   // Service categories
   final List<String> _serviceCategories = [
@@ -741,7 +745,7 @@ class _VendorsTabState extends State<VendorsTab> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '${snapshot.error}',
+                          '${_getUserFriendlyError(snapshot.error)}',
                           style: TextStyle(
                             color: Colors.grey.shade600,
                             fontSize: isMobile ? 12 : 14,
@@ -788,7 +792,7 @@ class _VendorsTabState extends State<VendorsTab> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          snapshot.data?['message'] ??
+                          _getUserFriendlyMessageFromResponse(snapshot.data) ??
                               'No service accounts have been registered yet',
                           style: TextStyle(
                             color: Colors.grey.shade500,
@@ -1693,11 +1697,11 @@ class _VendorsTabState extends State<VendorsTab> {
                               if (mounted) {
                                 // Improve error handling for duplicate email
                                 final errorMessage =
-                                    result['message'] ?? result['error'] ?? '';
+                                    _getUserFriendlyMessageFromResponse(result) ??
+                                    'Update failed. Please try again.';
                                 final errorLower = errorMessage.toLowerCase();
 
-                                String errorText =
-                                    'Update failed: $errorMessage';
+                                String errorText = 'Update failed: $errorMessage';
                                 if (errorLower.contains('duplicate') ||
                                     errorLower.contains('unique constraint') ||
                                     errorLower.contains('already exists')) {
@@ -1904,7 +1908,7 @@ class _VendorsTabState extends State<VendorsTab> {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
-                            'Operation failed: ${result['message']}',
+                            'Operation failed: ${_getUserFriendlyMessageFromResponse(result) ?? 'Operation failed. Please try again.'}',
                           ),
                           backgroundColor: Colors.red,
                           behavior: SnackBarBehavior.floating,
@@ -2277,7 +2281,7 @@ class _VendorsTabState extends State<VendorsTab> {
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      result['message'] ?? 'Delete failed',
+                                      _getUserFriendlyMessageFromResponse(result) ?? 'Delete failed',
                                     ),
                                   ),
                                 ],
@@ -2307,7 +2311,7 @@ class _VendorsTabState extends State<VendorsTab> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'Error deleting service account: ${e.toString()}',
+                                  'Error deleting service account: ${_getUserFriendlyError(e)}',
                                 ),
                               ),
                             ],
@@ -2902,7 +2906,7 @@ class _VendorsTabState extends State<VendorsTab> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '${snapshot.error}',
+                          '${_getUserFriendlyError(snapshot.error)}',
                           style: TextStyle(
                             color: Colors.grey.shade600,
                             fontSize: isMobile ? 12 : 14,
@@ -2936,7 +2940,7 @@ class _VendorsTabState extends State<VendorsTab> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          snapshot.data?['message'] ??
+                          _getUserFriendlyMessageFromResponse(snapshot.data) ??
                               'No service accounts have been registered yet',
                           style: TextStyle(
                             color: Colors.grey.shade500,
@@ -3165,10 +3169,10 @@ class _VendorsTabState extends State<VendorsTab> {
   }
 
   Widget _buildPerformanceAnalytics() {
-    // Load analytics data when this function is first accessed
-    if (_analyticsData == null && !_isLoadingAnalytics) {
+    // Load analytics data when this function is first accessed (only once)
+    if (!_hasAttemptedAnalyticsLoad && _analyticsData == null && !_isLoadingAnalytics && _analyticsError == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _loadAnalyticsData();
+        _loadAnalyticsData(isInitialLoad: true);
       });
     }
 
@@ -3285,6 +3289,46 @@ class _VendorsTabState extends State<VendorsTab> {
                 child: Padding(
                   padding: EdgeInsets.all(40.0),
                   child: CircularProgressIndicator(),
+                ),
+              )
+              : _analyticsError != null
+              ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Failed to load analytics data',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.red,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _analyticsError!,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade600,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: _loadAnalyticsData,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: evsuRed,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               )
               : _analyticsData == null
@@ -3862,6 +3906,11 @@ class _VendorsTabState extends State<VendorsTab> {
   Widget _buildTrendsData() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
+    
+    if (_analyticsData == null || _analyticsData!['service_data'] == null) {
+      return _buildNoDataTrends();
+    }
+    
     final serviceData = List<Map<String, dynamic>>.from(
       _analyticsData!['service_data'],
     );
@@ -4107,6 +4156,15 @@ class _VendorsTabState extends State<VendorsTab> {
     final isMobile = screenWidth < 600;
     final isTablet = screenWidth >= 600 && screenWidth < 1024;
 
+    if (_analyticsData == null || _analyticsData!['overall_metrics'] == null) {
+      return const Center(
+        child: Text(
+          'No metrics data available',
+          style: TextStyle(color: Colors.grey),
+        ),
+      );
+    }
+
     final metrics = _analyticsData!['overall_metrics'];
 
     // For very small screens, use single column
@@ -4310,9 +4368,19 @@ class _VendorsTabState extends State<VendorsTab> {
   }
 
   // Analytics data loading methods
-  Future<void> _loadAnalyticsData() async {
+  Future<void> _loadAnalyticsData({bool isInitialLoad = false}) async {
+    // Mark that we've attempted to load (prevents auto-reload on rebuild)
+    if (isInitialLoad) {
+      _hasAttemptedAnalyticsLoad = true;
+    }
+
+    // Record start time for minimum loading display
+    final loadStartTime = DateTime.now();
+    const minLoadingDuration = Duration(milliseconds: 500); // Minimum loading time to prevent flickering
+
     setState(() {
       _isLoadingAnalytics = true;
+      _analyticsError = null;
     });
 
     try {
@@ -4345,24 +4413,51 @@ class _VendorsTabState extends State<VendorsTab> {
             _selectedCategoryFilter == 'all' ? null : _selectedCategoryFilter,
       );
 
+      // Calculate elapsed time and wait if needed to prevent flickering
+      final elapsedTime = DateTime.now().difference(loadStartTime);
+      if (elapsedTime < minLoadingDuration) {
+        await Future.delayed(minLoadingDuration - elapsedTime);
+      }
+
+      // Consolidate all state updates into a single setState call
       if (result['success']) {
         setState(() {
           _analyticsData = result['data'];
+          _analyticsError = null;
+          _isLoadingAnalytics = false;
         });
       } else {
-        _showErrorDialog('Failed to load analytics data: ${result['message']}');
+        final errorMessage = _getUserFriendlyMessageFromResponse(result) ??
+            'Unable to load analytics data. Please try again later.';
+        setState(() {
+          _analyticsError = errorMessage;
+          _analyticsData = null;
+          _isLoadingAnalytics = false;
+        });
       }
     } catch (e) {
-      _showErrorDialog('Error loading analytics data: $e');
-    } finally {
+      // Calculate elapsed time and wait if needed to prevent flickering
+      final elapsedTime = DateTime.now().difference(loadStartTime);
+      if (elapsedTime < minLoadingDuration) {
+        await Future.delayed(minLoadingDuration - elapsedTime);
+      }
+
+      final errorMessage = _getUserFriendlyError(e);
+      // Consolidate all state updates into a single setState call
       setState(() {
+        _analyticsError = errorMessage;
+        _analyticsData = null;
         _isLoadingAnalytics = false;
       });
     }
   }
 
   Widget _buildPerformersList(bool isTop) {
-    if (_analyticsData == null) return const SizedBox.shrink();
+    if (_analyticsData == null || _analyticsData!['service_data'] == null) {
+      return const Center(
+        child: Text('No data available', style: TextStyle(color: Colors.grey)),
+      );
+    }
 
     final serviceData = List<Map<String, dynamic>>.from(
       _analyticsData!['service_data'],
@@ -4957,7 +5052,7 @@ class _VendorsTabState extends State<VendorsTab> {
       // Load scanners from database
       await _loadScanners();
     } catch (e) {
-      _showErrorDialog('Error loading data: $e');
+      _showErrorDialog('Error loading data: ${_getUserFriendlyError(e)}');
     } finally {
       setState(() {
         _isLoadingScanners = false;
@@ -4989,7 +5084,7 @@ class _VendorsTabState extends State<VendorsTab> {
         // Continue even if admin loading fails
       }
     } catch (e) {
-      _showErrorDialog('Error loading scanner data: $e');
+      _showErrorDialog('Error loading scanner data: ${_getUserFriendlyError(e)}');
     }
   }
 
@@ -5048,7 +5143,7 @@ class _VendorsTabState extends State<VendorsTab> {
         _showErrorDialog('Failed to assign scanner');
       }
     } catch (e) {
-      _showErrorDialog('Error assigning scanner: $e');
+      _showErrorDialog('Error assigning scanner: ${_getUserFriendlyError(e)}');
     }
   }
 
@@ -5104,7 +5199,7 @@ class _VendorsTabState extends State<VendorsTab> {
         _showErrorDialog('Failed to unassign scanner');
       }
     } catch (e) {
-      _showErrorDialog('Error unassigning scanner: $e');
+      _showErrorDialog('Error unassigning scanner: ${_getUserFriendlyError(e)}');
     }
   }
 
@@ -5197,10 +5292,12 @@ class _VendorsTabState extends State<VendorsTab> {
           _mainServices = List<Map<String, dynamic>>.from(result['data']);
         });
       } else {
-        _showErrorDialog('Failed to load main services: ${result['message']}');
+        _showErrorDialog(
+          'Failed to load main services: ${_getUserFriendlyMessageFromResponse(result) ?? 'Unable to load main services. Please try again later.'}',
+        );
       }
     } catch (e) {
-      _showErrorDialog('Error loading main services: ${e.toString()}');
+      _showErrorDialog('Error loading main services: ${_getUserFriendlyError(e)}');
     } finally {
       setState(() {
         _isLoadingMainServices = false;
@@ -5246,7 +5343,8 @@ class _VendorsTabState extends State<VendorsTab> {
         setState(() {});
       } else {
         // Improve error handling for duplicate email
-        final errorMessage = result['message'] ?? result['error'] ?? '';
+        final errorMessage = _getUserFriendlyMessageFromResponse(result) ??
+            'Failed to create service account. Please try again.';
         final errorLower = errorMessage.toLowerCase();
 
         if (errorLower.contains('duplicate') ||
@@ -5281,11 +5379,11 @@ class _VendorsTabState extends State<VendorsTab> {
           );
         } else {
           _showErrorDialog(
-            'Error creating service account: $e\n\nThe account may already exist in the database.',
+            'Error creating service account: ${_getUserFriendlyError(e)}\n\nThe account may already exist in the database.',
           );
         }
       } else {
-        _showErrorDialog('Error creating service account: ${e.toString()}');
+        _showErrorDialog('Error creating service account: ${_getUserFriendlyError(e)}');
       }
     } finally {
       setState(() {
@@ -5389,6 +5487,86 @@ class _VendorsTabState extends State<VendorsTab> {
       _selectedMainServiceId = null;
       _mainServices.clear();
     });
+  }
+
+  /// Get user-friendly message from service response
+  /// Handles both error objects and service response maps
+  String? _getUserFriendlyMessageFromResponse(Map<String, dynamic>? response) {
+    if (response == null) return null;
+    
+    // If there's an error field, use it
+    if (response['error'] != null) {
+      return _getUserFriendlyError(response['error']);
+    }
+    
+    // If there's a message field, check if it contains technical details
+    if (response['message'] != null) {
+      final message = response['message'].toString();
+      // Check if message contains technical error details
+      final messageLower = message.toLowerCase();
+      if (messageLower.contains('client exception') ||
+          messageLower.contains('socket exception') ||
+          messageLower.contains('failed host lookup') ||
+          messageLower.contains('connection') ||
+          messageLower.contains('network') ||
+          messageLower.contains('timeout') ||
+          messageLower.contains('socket') ||
+          messageLower.contains('supabase') ||
+          messageLower.contains('http://') ||
+          messageLower.contains('https://')) {
+        // It's a technical error, convert it to user-friendly
+        return _getUserFriendlyError(message);
+      }
+      // It's already a user-friendly message, return as is
+      return message;
+    }
+    
+    return null;
+  }
+
+  /// Get user-friendly error message without exposing technical details
+  String _getUserFriendlyError(dynamic error) {
+    // Check for socket/connection errors
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for Supabase client exceptions
+    if (error is PostgrestException) {
+      // Check if it's a connection error
+      final errorString = error.message.toLowerCase();
+      if (errorString.contains('connection') ||
+          errorString.contains('network') ||
+          errorString.contains('timeout') ||
+          errorString.contains('socket')) {
+        return 'No internet connection. Please check your network and try again.';
+      }
+      return 'Failed to load data. Please try again later.';
+    }
+
+    // Check for other connection-related errors
+    final errorString = error.toString().toLowerCase();
+    
+    // Check for network-related error messages
+    if (errorString.contains('socket') ||
+        errorString.contains('connection') ||
+        errorString.contains('network') ||
+        errorString.contains('timeout') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('no address associated') ||
+        errorString.contains('client exception')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Remove Supabase URLs from error message
+    if (errorString.contains('supabase') ||
+        errorString.contains('http://') ||
+        errorString.contains('https://')) {
+      return 'Unable to connect to server. Please check your internet connection and try again.';
+    }
+
+    // Generic error message for other errors
+    return 'Failed to load data. Please try again later.';
   }
 
   void _showErrorDialog(String message) {
