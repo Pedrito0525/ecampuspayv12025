@@ -39,7 +39,7 @@ class SupabaseConfig {
     print(
       'WARNING SupabaseConfig: Using hardcoded project reference. Consider adding SUPABASE_URL to .env',
     );
-    return 'weesdfhgwyuozivhedhej';
+    return 'weesgvewyuozivhedhej'; // Updated to match actual project reference
   }
 
   // Initialize by fetching keys from Edge Function

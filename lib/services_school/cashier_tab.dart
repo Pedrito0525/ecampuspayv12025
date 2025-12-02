@@ -932,23 +932,29 @@ class _CashierTabState extends State<CashierTab> {
   }
 
   Widget _buildAddPaymentCard(bool isWeb, bool isTablet) {
+    final bool isEnabled = _isScannerConnected;
+
     return GestureDetector(
-      onTap: _showCustomPaymentModal,
+      onTap: isEnabled ? _showCustomPaymentModal : null,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isEnabled ? Colors.white : Colors.grey.shade200,
           borderRadius: BorderRadius.circular(isWeb ? 15 : 12),
           border: Border.all(
-            color: const Color(0xFFB91C1C).withOpacity(0.3),
+            color:
+                isEnabled
+                    ? const Color(0xFFB91C1C).withOpacity(0.3)
+                    : Colors.grey.shade400,
             width: 2,
             style: BorderStyle.solid,
           ),
           boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
+            if (isEnabled)
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
           ],
         ),
         child: Column(
@@ -958,12 +964,16 @@ class _CashierTabState extends State<CashierTab> {
               width: isWeb ? 50 : (isTablet ? 45 : 40),
               height: isWeb ? 50 : (isTablet ? 45 : 40),
               decoration: BoxDecoration(
-                color: const Color(0xFFB91C1C).withOpacity(0.1),
+                color:
+                    isEnabled
+                        ? const Color(0xFFB91C1C).withOpacity(0.1)
+                        : Colors.grey.shade400.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(25),
               ),
               child: Icon(
                 Icons.add,
-                color: const Color(0xFFB91C1C),
+                color:
+                    isEnabled ? const Color(0xFFB91C1C) : Colors.grey.shade500,
                 size: isWeb ? 28 : (isTablet ? 25 : 22),
               ),
             ),
@@ -973,11 +983,24 @@ class _CashierTabState extends State<CashierTab> {
               style: TextStyle(
                 fontSize: isWeb ? 14 : (isTablet ? 13 : 12),
                 fontWeight: FontWeight.w600,
-                color: const Color(0xFFB91C1C),
+                color:
+                    isEnabled ? const Color(0xFFB91C1C) : Colors.grey.shade500,
               ),
               textAlign: TextAlign.center,
               maxLines: 2,
             ),
+            if (!isEnabled) ...[
+              SizedBox(height: isWeb ? 8 : 6),
+              Text(
+                'Scanner not connected',
+                style: TextStyle(
+                  fontSize: isWeb ? 12 : 10,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ],
         ),
       ),
@@ -985,6 +1008,19 @@ class _CashierTabState extends State<CashierTab> {
   }
 
   void _showCustomPaymentModal() {
+    if (!_isScannerConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please connect scanner before creating custom payment',
+          ),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     String? selectedCategory;
     final priceController = TextEditingController();
     final categories = _getCustomPaymentCategories();
@@ -999,6 +1035,7 @@ class _CashierTabState extends State<CashierTab> {
         final maxHeight = MediaQuery.of(context).size.height * 0.7;
         return StatefulBuilder(
           builder: (context, setModalState) {
+            final bool isConnected = _isScannerConnected;
             return AlertDialog(
               title: const Text(
                 'Custom Payment',
@@ -1148,46 +1185,56 @@ class _CashierTabState extends State<CashierTab> {
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
-                  onPressed: () {
-                    final category = (selectedCategory ?? '').trim();
-                    final amount = double.tryParse(priceController.text);
+                  onPressed:
+                      isConnected
+                          ? () {
+                            final category = (selectedCategory ?? '').trim();
+                            final amount = double.tryParse(
+                              priceController.text,
+                            );
 
-                    if (category.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Please enter a payment category'),
-                          backgroundColor: Color(0xFFDC3545),
-                        ),
-                      );
-                      return;
-                    }
+                            if (category.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Please enter a payment category',
+                                  ),
+                                  backgroundColor: Color(0xFFDC3545),
+                                ),
+                              );
+                              return;
+                            }
 
-                    if (amount == null || amount <= 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Please enter a valid amount'),
-                          backgroundColor: Color(0xFFDC3545),
-                        ),
-                      );
-                      return;
-                    }
+                            if (amount == null || amount <= 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please enter a valid amount'),
+                                  backgroundColor: Color(0xFFDC3545),
+                                ),
+                              );
+                              return;
+                            }
 
-                    // Navigate directly to payment screen with custom payment
-                    Navigator.pop(context);
-                    widget.onProductSelected({
-                      'id':
-                          'custom-payment-${DateTime.now().millisecondsSinceEpoch}',
-                      'name': category,
-                      'price': amount,
-                      'category': 'Custom',
-                      'orderType': 'single',
-                      'onPaymentSuccess': () {
-                        widget.onPaymentSuccess?.call();
-                      },
-                    });
-                  },
+                            // Navigate directly to payment screen with custom payment
+                            Navigator.pop(context);
+                            widget.onProductSelected({
+                              'id':
+                                  'custom-payment-${DateTime.now().millisecondsSinceEpoch}',
+                              'name': category,
+                              'price': amount,
+                              'category': 'Custom',
+                              'orderType': 'single',
+                              'onPaymentSuccess': () {
+                                widget.onPaymentSuccess?.call();
+                              },
+                            });
+                          }
+                          : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFB91C1C),
+                    backgroundColor:
+                        isConnected
+                            ? const Color(0xFFB91C1C)
+                            : const Color(0xFFCCCCCC),
                     foregroundColor: Colors.white,
                   ),
                   child: const Text('Proceed to Payment'),

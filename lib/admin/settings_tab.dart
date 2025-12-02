@@ -1293,14 +1293,16 @@ class _SettingsTabState extends State<SettingsTab> {
         });
       } else {
         if (mounted) {
-          _showErrorDialog(
-            result['message'] ?? 'Failed to load commission settings',
-          );
+          final errorMessage =
+              result['message'] ?? 'Failed to load commission settings';
+          final friendlyMessage = _getUserFriendlyErrorMessage(errorMessage);
+          _showErrorDialog(friendlyMessage);
         }
       }
     } catch (e) {
       if (mounted) {
-        _showErrorDialog('Error loading commission settings: $e');
+        final errorMessage = _getUserFriendlyErrorMessage(e);
+        _showErrorDialog(errorMessage);
       }
     } finally {
       if (mounted) {
@@ -1361,14 +1363,16 @@ class _SettingsTabState extends State<SettingsTab> {
         }
       } else {
         if (mounted) {
-          _showErrorDialog(
-            result['message'] ?? 'Failed to update commission settings',
-          );
+          final errorMessage =
+              result['message'] ?? 'Failed to update commission settings';
+          final friendlyMessage = _getUserFriendlyErrorMessage(errorMessage);
+          _showErrorDialog(friendlyMessage);
         }
       }
     } catch (e) {
       if (mounted) {
-        _showErrorDialog('Error updating commission settings: $e');
+        final errorMessage = _getUserFriendlyErrorMessage(e);
+        _showErrorDialog(errorMessage);
       }
     } finally {
       if (mounted) {
@@ -4334,6 +4338,55 @@ class _SettingsTabState extends State<SettingsTab> {
             ],
           ),
     );
+  }
+
+  /// Get user-friendly error message from exception
+  String _getUserFriendlyErrorMessage(dynamic error) {
+    // Check for SocketException (no internet connection)
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Convert error to string for pattern matching
+    final errorString = error.toString().toLowerCase();
+
+    // Check for ClientException with SocketException (common network error pattern)
+    if (errorString.contains('clientexception') &&
+        (errorString.contains('socketexception') ||
+            errorString.contains('failed host lookup') ||
+            errorString.contains('failed host') ||
+            errorString.contains('network is unreachable'))) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for SocketException patterns in error string
+    if (errorString.contains('socketexception') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('failed host') ||
+        errorString.contains('network is unreachable') ||
+        errorString.contains('no internet') ||
+        errorString.contains('connection refused') ||
+        errorString.contains('connection timed out')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for timeout errors
+    if (errorString.contains('timeout') || errorString.contains('timed out')) {
+      return 'Request timed out. Please check your connection and try again.';
+    }
+
+    // Check for ClientException (general network errors)
+    if (errorString.contains('clientexception')) {
+      return 'Network error. Please check your connection and try again.';
+    }
+
+    // Check for Supabase-specific errors
+    if (errorString.contains('postgres') || errorString.contains('database')) {
+      return 'Database error. Please try again later.';
+    }
+
+    // Default error message
+    return 'An error occurred. Please try again.';
   }
 
   void _showErrorDialog(String message) {

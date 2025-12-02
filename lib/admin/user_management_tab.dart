@@ -3940,7 +3940,7 @@ class _UserManagementTabState extends State<UserManagementTab> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'The student can now login using their email and password.',
+                      'The student can now login using their Student ID and Temp password.',
                       style: TextStyle(
                         fontSize: isMobile ? 11 : 12,
                         fontStyle: FontStyle.italic,

@@ -2848,6 +2848,41 @@ for all to authenticated using (true) with check (true);
     }
   }
 
+  /// Get service account by email (case-insensitive, stored in plain text)
+  static Future<Map<String, dynamic>> getServiceAccountByEmail(
+    String email,
+  ) async {
+    try {
+      final normalizedEmail = email.trim().toLowerCase();
+
+      final serviceResponse =
+          await adminClient
+              .from('service_accounts')
+              .select('*')
+              .ilike('email', normalizedEmail)
+              .maybeSingle();
+
+      if (serviceResponse == null) {
+        return {
+          'success': false,
+          'message': 'Service account not found for email $email',
+        };
+      }
+
+      return {
+        'success': true,
+        'data': serviceResponse,
+        'message': 'Service account retrieved successfully',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to retrieve service account: ${e.toString()}',
+      };
+    }
+  }
+
   // OTP and Password Reset Operations
 
   /// Resend email confirmation link for auth_students
@@ -2858,10 +2893,21 @@ for all to authenticated using (true) with check (true);
     try {
       final normalizedEmail = email.trim().toLowerCase();
 
+      bool emailExists = false;
+
       // Check if email exists in auth_students table
       final userResult = await getUserByEmail(normalizedEmail);
+      if (userResult['success'] == true) {
+        emailExists = true;
+      } else {
+        // Check service accounts table for non-student emails
+        final serviceResult = await getServiceAccountByEmail(normalizedEmail);
+        if (serviceResult['success'] == true) {
+          emailExists = true;
+        }
+      }
 
-      if (!userResult['success']) {
+      if (!emailExists) {
         return {
           'success': false,
           'message': 'Email not found. Please check your email address.',
@@ -4661,32 +4707,29 @@ for all to authenticated using (true) with check (true);
       // Create auth user if it doesn't exist
       if (authUserRecord == null) {
         try {
-          final createResponse = await adminClient.auth.admin.createUser(
-            AdminUserAttributes(
-              email: normalizedEmail,
-              password: password,
-              emailConfirm:
-                  true, // Auto-confirm email, no need for service account to confirm
-              userMetadata: {
-                'role': 'service_account',
-                'service_name': serviceName.trim(),
-                'username': username.trim(),
-              },
-            ),
+          // Use signUp instead of admin.createUser to require email confirmation
+          final signUpResponse = await SupabaseService.client.auth.signUp(
+            email: normalizedEmail,
+            password: password,
+            data: {
+              'role': 'service_account',
+              'service_name': serviceName.trim(),
+              'username': username.trim(),
+            },
           );
 
-          if (createResponse.user == null) {
+          if (signUpResponse.user == null) {
             return {
               'success': false,
               'error': 'Failed to create auth user',
               'message':
-                  'Failed to create Supabase Auth user for service account.',
+                  'Failed to create Supabase Auth user for service account. A confirmation email has been sent.',
             };
           }
 
           authUserRecord = {
-            'id': createResponse.user!.id,
-            'email_confirmed_at': createResponse.user!.emailConfirmedAt,
+            'id': signUpResponse.user!.id,
+            'email_confirmed_at': signUpResponse.user!.emailConfirmedAt,
           };
         } catch (authError) {
           // If auth user creation fails, check if it's a duplicate
@@ -5259,6 +5302,45 @@ for all to authenticated using (true) with check (true);
           'error': 'Invalid password',
           'message': 'Invalid username or password',
         };
+      }
+
+      // Check if email is confirmed before allowing login
+      final email = account['email']?.toString();
+      if (email != null && email.isNotEmpty) {
+        try {
+          // Try to sign in with password to check if email is confirmed
+          // This will fail if email is not confirmed
+          try {
+            await client.auth.signInWithPassword(
+              email: email,
+              password: password,
+            );
+            // If sign-in succeeds, email is confirmed - sign out immediately
+            await client.auth.signOut();
+          } catch (signInError) {
+            final errorString = signInError.toString().toLowerCase();
+            // Check if error is about email not confirmed
+            if (errorString.contains('email not confirmed') ||
+                errorString.contains('email_not_confirmed') ||
+                errorString.contains('confirm your email')) {
+              return {
+                'success': false,
+                'error': 'Email not confirmed',
+                'message':
+                    'Please confirm your email before logging in. Check your inbox for the confirmation email.',
+                'email': email,
+              };
+            }
+            // If it's a different error (like wrong password), continue with password hash check
+            // The password hash check below will catch invalid passwords
+          }
+        } catch (adminError) {
+          // If we can't check email confirmation status, log it but continue
+          // The login will proceed, but service account may need to confirm email
+          print(
+            'DEBUG: Could not check service account email confirmation status: $adminError',
+          );
+        }
       }
 
       // Return sanitized account data

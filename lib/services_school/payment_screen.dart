@@ -51,7 +51,9 @@ class _PaymentScreenState extends State<PaymentScreen>
   // Map-based stream not used here; using account service string stream
   String? transactionId;
   DateTime? transactionTime;
-  AudioPlayer _audioPlayer = AudioPlayer();
+  // Separate audio players for success and declined sounds (preloaded)
+  final AudioPlayer _successPlayer = AudioPlayer();
+  final AudioPlayer _declinePlayer = AudioPlayer();
   bool _isNavigating = false; // Prevent multiple navigation operations
   bool _isProcessing =
       false; // Synchronous guard to prevent duplicate processing
@@ -83,6 +85,9 @@ class _PaymentScreenState extends State<PaymentScreen>
 
     _animationController.repeat(reverse: true);
 
+    // Preload audio assets for instant playback (no loading delay)
+    _preloadAudio();
+
     // Get purpose from product map if available (for Campus Service Units)
     if (_isCampusServiceUnits) {
       _paymentPurpose = widget.product['purpose']?.toString();
@@ -96,8 +101,19 @@ class _PaymentScreenState extends State<PaymentScreen>
   void dispose() {
     _animationController.dispose();
     _rfidDataSubscription?.cancel();
-    _audioPlayer.dispose();
+    _successPlayer.dispose();
+    _declinePlayer.dispose();
     super.dispose();
+  }
+
+  Future<void> _preloadAudio() async {
+    try {
+      // Set sources without playing so they are ready in memory
+      await _successPlayer.setSourceAsset('applepay.mp3');
+      await _declinePlayer.setSourceAsset('card-declined2.mp3');
+    } catch (e) {
+      print('Error preloading audio: $e');
+    }
   }
 
   Future<void> _startRealRFIDListening() async {
@@ -462,6 +478,7 @@ class _PaymentScreenState extends State<PaymentScreen>
           paymentIcon = '❌';
           paymentZoneColor = Colors.red;
         });
+        await _playDeclinedSound();
         _showErrorDialogAndNavigateBack(
           'Card not registered',
           'This RFID is not registered yet.',
@@ -507,6 +524,7 @@ class _PaymentScreenState extends State<PaymentScreen>
           paymentIcon = '⚠️';
           paymentZoneColor = Colors.orange;
         });
+        await _playDeclinedSound();
         _showErrorDialogAndNavigateBack(
           'Insufficient Balance',
           'The account does not have enough balance.',
@@ -651,9 +669,21 @@ class _PaymentScreenState extends State<PaymentScreen>
 
   Future<void> _playSuccessSound() async {
     try {
-      await _audioPlayer.play(AssetSource('applepay.mp3'));
+      // Restart from beginning and play without awaiting to avoid UI delay
+      await _successPlayer.seek(Duration.zero);
+      _successPlayer.resume();
     } catch (e) {
       print('Error playing success sound: $e');
+    }
+  }
+
+  Future<void> _playDeclinedSound() async {
+    try {
+      // Restart from beginning and play without awaiting to avoid UI delay
+      await _declinePlayer.seek(Duration.zero);
+      _declinePlayer.resume();
+    } catch (e) {
+      print('Error playing declined sound: $e');
     }
   }
 

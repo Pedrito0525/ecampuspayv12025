@@ -335,6 +335,23 @@ class _LoginPageState extends State<LoginPage> {
           'DEBUG: Service account authentication failed: ${serviceResult['message']}',
         );
 
+        // Check if the error is about email confirmation - show dialog with resend option
+        final serviceErrorMessage = serviceResult['message']?.toString() ?? '';
+        if (serviceErrorMessage.toLowerCase().contains('confirm your email') ||
+            serviceErrorMessage.toLowerCase().contains('email confirmation') ||
+            serviceErrorMessage.toLowerCase().contains('email not confirmed')) {
+          // Get email from service result or service account
+          final serviceEmail = serviceResult['email']?.toString();
+          if (serviceEmail != null && serviceEmail.isNotEmpty) {
+            await _showServiceEmailConfirmationDialog(serviceEmail);
+          } else {
+            _showErrorDialog(
+              'Please confirm your email before logging in. Check your inbox for the confirmation email.',
+            );
+          }
+          return;
+        }
+
         // Check if account is deactivated and show specific error message
         if (serviceResult['is_deactivated'] == true) {
           _showErrorDialog(
@@ -585,6 +602,222 @@ class _LoginPageState extends State<LoginPage> {
     setState(() {
       _showFloatingError = false;
     });
+  }
+
+  /// Show email confirmation dialog for service accounts with option to resend confirmation email
+  Future<void> _showServiceEmailConfirmationDialog(String email) async {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        const Color evsuRed = Color(0xFFB01212);
+        bool isResending = false;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: Row(
+                children: [
+                  Icon(Icons.email_outlined, color: evsuRed, size: 24),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Email Not Confirmed',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Please confirm your email address before logging in. Check your inbox for the confirmation email.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.email,
+                          color: Colors.blue.shade700,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            email,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.blue.shade900,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'If you didn\'t receive the email or the link has expired, you can request a new confirmation email.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed:
+                      isResending ? null : () => Navigator.of(context).pop(),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.grey[700],
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed:
+                      isResending
+                          ? null
+                          : () async {
+                            setDialogState(() {
+                              isResending = true;
+                            });
+
+                            try {
+                              final result =
+                                  await SupabaseService.resendEmailConfirmation(
+                                    email: email,
+                                  );
+
+                              if (mounted) {
+                                Navigator.of(context).pop();
+
+                                if (result['success']) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.check_circle,
+                                            color: Colors.white,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              result['message'] ??
+                                                  'Confirmation email sent successfully!',
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      backgroundColor: Colors.green,
+                                      behavior: SnackBarBehavior.floating,
+                                      duration: const Duration(seconds: 4),
+                                    ),
+                                  );
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.error_outline,
+                                            color: Colors.white,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              result['message'] ??
+                                                  'Failed to send confirmation email.',
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      backgroundColor: Colors.red,
+                                      behavior: SnackBarBehavior.floating,
+                                      duration: const Duration(seconds: 4),
+                                    ),
+                                  );
+                                }
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                Navigator.of(context).pop();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.error_outline,
+                                          color: Colors.white,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            'Error sending confirmation email: ${e.toString()}',
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    backgroundColor: Colors.red,
+                                    behavior: SnackBarBehavior.floating,
+                                    duration: const Duration(seconds: 4),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: evsuRed,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon:
+                      isResending
+                          ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                          : const Icon(Icons.refresh, size: 18),
+                  label: Text(
+                    isResending ? 'Sending...' : 'Resend Email',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   /// Show email confirmation dialog with option to resend confirmation email

@@ -58,7 +58,8 @@ class _ApiConfigurationScreenState extends State<ApiConfigurationScreen> {
       });
     } catch (e) {
       print("Error loading top-up options: $e");
-      _showToast('Error loading top-up options: $e');
+      final errorMessage = _getUserFriendlyErrorMessage(e);
+      _showErrorDialog(errorMessage);
       setState(() => _isLoading = false);
     }
   }
@@ -79,7 +80,8 @@ class _ApiConfigurationScreenState extends State<ApiConfigurationScreen> {
         });
       }
     } catch (e) {
-      _showToast('Error picking image: $e');
+      final errorMessage = _getUserFriendlyErrorMessage(e);
+      _showErrorDialog(errorMessage);
     }
   }
 
@@ -102,7 +104,8 @@ class _ApiConfigurationScreenState extends State<ApiConfigurationScreen> {
       return publicUrl;
     } catch (e) {
       print("Error uploading QR image: $e");
-      _showToast('Error uploading image: $e');
+      final errorMessage = _getUserFriendlyErrorMessage(e);
+      _showErrorDialog(errorMessage);
       return null;
     }
   }
@@ -247,7 +250,8 @@ class _ApiConfigurationScreenState extends State<ApiConfigurationScreen> {
       await _loadTopUpOptions();
     } catch (e) {
       print("Error saving top-up option: $e");
-      _showToast('Error saving: $e');
+      final errorMessage = _getUserFriendlyErrorMessage(e);
+      _showErrorDialog(errorMessage);
     } finally {
       setState(() => _isLoading = false);
     }
@@ -305,7 +309,8 @@ class _ApiConfigurationScreenState extends State<ApiConfigurationScreen> {
       await _loadTopUpOptions();
     } catch (e) {
       print("Error deleting top-up option: $e");
-      _showToast('Error deleting: $e');
+      final errorMessage = _getUserFriendlyErrorMessage(e);
+      _showErrorDialog(errorMessage);
     } finally {
       setState(() => _isLoading = false);
     }
@@ -356,7 +361,8 @@ class _ApiConfigurationScreenState extends State<ApiConfigurationScreen> {
 
       await _loadTopUpOptions();
     } catch (e) {
-      _showToast('Error updating status: $e');
+      final errorMessage = _getUserFriendlyErrorMessage(e);
+      _showErrorDialog(errorMessage);
     }
   }
 
@@ -1002,6 +1008,118 @@ class _ApiConfigurationScreenState extends State<ApiConfigurationScreen> {
                 tooltip: 'Delete',
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Get user-friendly error message from exception
+  String _getUserFriendlyErrorMessage(dynamic error) {
+    // Check for SocketException (no internet connection)
+    if (error is SocketException) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Convert error to string for pattern matching
+    final errorString = error.toString().toLowerCase();
+    
+    // Check for ClientException with SocketException (common network error pattern)
+    if (errorString.contains('clientexception') && 
+        (errorString.contains('socketexception') ||
+         errorString.contains('failed host lookup') ||
+         errorString.contains('network is unreachable'))) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for SocketException patterns in error string
+    if (errorString.contains('socketexception') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('network is unreachable') ||
+        errorString.contains('no internet') ||
+        errorString.contains('connection refused') ||
+        errorString.contains('connection timed out')) {
+      return 'No internet connection. Please check your network and try again.';
+    }
+
+    // Check for timeout errors
+    if (errorString.contains('timeout') || errorString.contains('timed out')) {
+      return 'Request timed out. Please check your connection and try again.';
+    }
+
+    // Check for ClientException (general network errors)
+    if (errorString.contains('clientexception')) {
+      return 'Network error. Please check your connection and try again.';
+    }
+
+    // Check for Supabase-specific errors
+    if (errorString.contains('postgres') || errorString.contains('database')) {
+      return 'Database error. Please try again later.';
+    }
+
+    // Default error message
+    return 'An error occurred. Please try again.';
+  }
+
+  /// Show error dialog with user-friendly message
+  void _showErrorDialog(String message) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        title: Row(
+          children: [
+            Icon(
+              Icons.error_outline,
+              color: Colors.red.shade700,
+              size: isMobile ? 24 : 28,
+            ),
+            SizedBox(width: isMobile ? 8 : 12),
+            Expanded(
+              child: Text(
+                'Error',
+                style: TextStyle(
+                  fontSize: isMobile ? 18 : 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: isMobile ? MediaQuery.of(context).size.width * 0.8 : 400,
+          ),
+          child: SingleChildScrollView(
+            child: Text(
+              message,
+              style: TextStyle(fontSize: isMobile ? 14 : 16),
+            ),
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: evsuRed,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(
+                horizontal: isMobile ? 20 : 24,
+                vertical: isMobile ? 10 : 12,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text(
+              'OK',
+              style: TextStyle(fontSize: isMobile ? 14 : 16),
+            ),
           ),
         ],
       ),
